@@ -4,6 +4,10 @@ The reference target is the Waveshare ESP32-S3-AUDIO-Board: a dual-mic array
 with an ES7210 4-channel ADC, chosen over the ePaper-1.54 board because mic
 quality is the thing that matters most for a Plaud-style recorder.
 
+There is also a thinner **XIAO ESP32-S3 Sense + direct LiPo** prototype path.
+It is smaller and faster to carry-test, but it uses a single digital mic and a
+stacked camera/mic module, so it is not the final PLAUD-thin hardware.
+
 | Part | Spec | Approx cost | Notes |
 |---|---|---|---|
 | Waveshare ESP32-S3-AUDIO-Board | ESP32-S3R8, 8MB PSRAM, 16MB Flash, dual mic + ES7210 ADC + ES8311 DAC, microSD, USB-C, MX1.25 LiPo connector + charge mgmt, 58×43.7 mm | ~₩22k ($16 board-only) / ~₩25k ($18 +battery) | Two SKUs — pick **"+battery"** to bundle the cell |
@@ -16,6 +20,18 @@ quality is the thing that matters most for a Plaud-style recorder.
 **Portable recorder (essential): board + battery + microSD + case ≈ ₩55–70k.**
 Screen, magnet, and extra mics are the genuinely optional extras.
 Still a better-mic build than the original Pala Note.
+
+## Thin prototype path — XIAO ESP32-S3 Sense
+
+| Part | Spec | Approx cost | Notes |
+|---|---|---:|---|
+| Seeed XIAO ESP32-S3 Sense | ESP32-S3, Wi-Fi/BLE, camera, digital mic, SD slot, 21×17.8×15 mm with Sense expansion board | $13.99 / domestic ~₩22–24k | Buy unsoldered if available; pre-soldered headers add bulk |
+| Flat 3.7V LiPo | 503035-class, ~500 mAh, protected preferred | ~₩8–12k | Direct-solder red/black leads to XIAO battery pads; verify polarity |
+| microSD | 32GB FAT for safest XIAO bring-up | ~₩8–15k | XIAO docs mention 32GB FAT support; test larger cards later |
+| Kapton tape + 30AWG silicone wire | insulation + strain relief | ~₩3–8k | Required for safe direct battery wiring |
+| Case | `hardware/case/stl/open_plaud_xiao_lipo_*.stl` | ~₩5–15k print | First-article STL; measure and iterate |
+
+**XIAO carry prototype electronics ≈ ₩35–55k before printing.**
 
 > 📍 In Seoul/Korea? See **[shopping-seoul.md](./shopping-seoul.md)** for exact vendors,
 > Korean search terms, and the fastest vs. cheapest buying paths.
