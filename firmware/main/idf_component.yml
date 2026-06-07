@@ -3,3 +3,5 @@ dependencies:
   # ES7210 (ADC) / ES8311 (DAC) codec abstraction — mirrors Espressif's
   # i2s_es7210_tdm example. Pulls the ES7210 driver used in audio.c.
   espressif/esp_codec_dev: ">=1.5.0"
+  # Board status ring on GPIO38 (7x WS2812B), useful during headless bring-up.
+  espressif/led_strip: ">=2.5.3"

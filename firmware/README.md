@@ -44,6 +44,7 @@ then `wrote N bytes to /sdcard/rec_0001.wav`. That WAV is your captured audio.
 |---|---|
 | `main/board.h` | **pin map** (schematic-confirmed) — I2S/I2C/SD + TCA9555 expander bits |
 | `main/audio.c` | ES7210 dual-mic capture (I2C via `esp_codec_dev`, I2S-TDM RX) |
+| `main/status_led.c` | GPIO38 / 7x WS2812 status ring for headless bring-up feedback |
 | `main/sdcard.c` | mount microSD (FATFS, **1-bit** SDMMC: CLK=40, CMD=42, D0=41) |
 | `main/wav.c` | streaming 16-bit PCM WAV writer |
 | `main/net_upload.c` | **stub** — multipart upload to the server (next milestone) |
@@ -62,17 +63,35 @@ Content-Type: multipart/form-data
 → 200 { "id": "...", "status": "transcribing" }
 ```
 
+## Lessons from ESPHome voice-satellite builds
+
+The Waveshare board is also used as a Home Assistant voice satellite. The useful
+hardware lessons for this recorder are:
+
+- Keep the microphone path at **16 kHz / 16-bit**. That matches the ESPHome
+  voice-assistant config and is enough for server-side transcription while
+  keeping WAV files small.
+- The speaker DAC (ES8311) and mic ADC (ES7210) share MCLK/BCLK/LRCK, but
+  open-plaud does not need simultaneous playback. Leave ES8311 unused for v1;
+  do not import the ESPHome custom ES8311 master-mode patch unless playback is
+  added later.
+- Use the onboard 7-pixel WS2812 ring for visible state. A headless recorder
+  needs immediate boot/SD/audio/record/error feedback before Wi-Fi upload exists.
+- Buttons and speaker amp enable are behind the TCA9555 expander, not native
+  ESP32 GPIOs. Hold-to-record needs an I2C expander driver in the next milestone.
+
 ## TODO (ROADMAP v1)
 
 - [ ] Wi-Fi STA + multipart upload in `net_upload.c` (creds via `menuconfig`/NVS).
 - [ ] Hold-to-record button — **on the TCA9555 expander** (`BSP_EXIO_KEY1`), read over
       I2C, not a GPIO. Speaker amp enable (`BSP_EXIO_PA_CTRL`) is there too.
-- [ ] Rotate filenames / tag recordings; RGB ring (GPIO38, 7×WS2812) as status.
+- [x] RGB ring (GPIO38, 7×WS2812) as status.
+- [ ] Rotate filenames / tag recordings.
 - [ ] Confirm SD at higher clock; D1/D2 aren't GPIO-wired so stay 1-bit.
 
 ## Sources
 
 - Pin map: Waveshare schematic `ESP32-S3-AUDIO-Board_1.1.pdf`
   ([wiki](https://www.waveshare.com/wiki/ESP32-S3-AUDIO-Board)), cross-checked vs an
-  [ESPHome config](https://github.com/ichbaum/esphome-esp32_s3_audio_board) for this board.
+  [ESPHome config](https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice) for this board.
 - Capture recipe: ESP-IDF `examples/peripherals/i2s/i2s_codec/i2s_es7210_tdm`.

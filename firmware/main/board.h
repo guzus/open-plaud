@@ -3,12 +3,18 @@
  * Waveshare ESP32-S3-AUDIO-Board pin map.
  *
  * Confidence: schematic-confirmed against ESP32-S3-AUDIO-Board_1.1.pdf and
- * cross-checked against an ESPHome config for this exact board. Sources are
- * listed in firmware/README.md. Pins marked UNKNOWN are not wired to a labelled
- * GPIO in the published schematic — measure/confirm before relying on them.
+ * cross-checked against ESPHome voice-satellite configs for this exact board.
+ * Sources are listed in firmware/README.md. Pins marked UNKNOWN are not wired
+ * to a labelled GPIO in the published schematic — measure/confirm before
+ * relying on them.
  */
 
-/* ---- I2S0 (single shared full-duplex bus; the recorder uses RX only) ---- */
+/* ---- I2S0 (single shared full-duplex bus; the recorder uses RX only)
+ *
+ * ESPHome voice-satellite builds sometimes force ES8311 to master mode for
+ * simultaneous speaker+mic operation. open-plaud records from ES7210 only, so
+ * ESP32-S3 remains the I2S master and generates MCLK/BCLK/LRCK directly.
+ */
 #define BSP_I2S_MCLK_GPIO    12
 #define BSP_I2S_BCLK_GPIO    13
 #define BSP_I2S_WS_GPIO      14
