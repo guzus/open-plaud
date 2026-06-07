@@ -8,13 +8,13 @@ quality is the thing that matters most for a Plaud-style recorder.
 |---|---|---|---|
 | Waveshare ESP32-S3-AUDIO-Board | ESP32-S3R8, 8MB PSRAM, 16MB Flash, dual mic + ES7210 ADC + ES8311 DAC, microSD, USB-C, MX1.25 LiPo connector + charge mgmt, 58×43.7 mm | ~₩22k ($16 board-only) / ~₩25k ($18 +battery) | Two SKUs — pick **"+battery"** to bundle the cell |
 | 3.7V LiPo battery — **required** (portable) | ~500 mAh, **MX1.25 2-pin**, correct polarity | ~₩5–8k | Bundled if you chose the +battery SKU; else buy one |
-| microSD card | 8–32GB, FAT32 | ~₩7k | Records WAV here |
+| microSD card | 64–128GB, FAT32 | ~₩20–30k | 32GB barely cheaper (~₩2만) — size up; records WAV here |
 | Case — **required** (carry) | fits 58×43.7 mm board, mic/speaker/USB cutouts | ~₩5–10k | 3D-print custom; **no repo STL yet** (ROADMAP v1) |
 | (optional) SPI LCD | Waveshare 1.47"/2"/2.8" | ~₩8–15k | Status/UI; not e-ink |
 | (optional) MagSafe magnet ring | — | ~₩5k | For card-style phone attach |
 
-**Portable recorder (essential): board + battery + microSD + case ≈ ₩40–50k.**
-Screen, magnet, and extra mics are the genuinely optional extras (up to ~₩55–65k).
+**Portable recorder (essential): board + battery + microSD + case ≈ ₩55–70k.**
+Screen, magnet, and extra mics are the genuinely optional extras.
 Still a better-mic build than the original Pala Note.
 
 > 📍 In Seoul/Korea? See **[shopping-seoul.md](./shopping-seoul.md)** for exact vendors,
