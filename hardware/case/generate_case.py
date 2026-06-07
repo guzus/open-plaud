@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["build123d>=0.10"]
+# dependencies = ["build123d>=0.10,<0.11"]
 # ///
 """
 open-plaud — parametric case for the Waveshare ESP32-S3-AUDIO-Board.
@@ -82,7 +82,8 @@ def base_tray():
     for x in (-sx, sx):
         for y in (-sy, sy):
             post = Pos(x, y, FLOOR + STANDOFF_H / 2) * Cylinder(SO_R, STANDOFF_H)
-            post -= Pos(x, y, FLOOR + STANDOFF_H / 2) * Cylinder(SO_HOLE_R, STANDOFF_H + 1)
+            # pilot hole stays inside the post (offset +0.5 keeps the floor intact)
+            post -= Pos(x, y, FLOOR + STANDOFF_H / 2 + 0.5) * Cylinder(SO_HOLE_R, STANDOFF_H)
             part += post
 
     # USB-C on the +X short edge, microSD on the -X short edge (boxes pierce the wall)
@@ -123,6 +124,7 @@ def main():
     }
     for name, solid in parts.items():
         path = OUT / name
+        assert solid.volume > 0, f"{name}: empty solid — check parameters"
         export_stl(solid, str(path), ascii_format=True)
         bb = solid.bounding_box()
         size = bb.size
