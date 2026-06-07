@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Audio / recordings (local data, not source)
+*.wav
+*.flac
+*.m4a
+data/
+recordings/
+storage/
+
+# Firmware build artifacts (ESP-IDF)
+firmware/build/
+sdkconfig
+sdkconfig.old
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
