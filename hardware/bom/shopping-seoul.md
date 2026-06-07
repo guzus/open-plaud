@@ -17,7 +17,7 @@ A device you carry needs **board + battery + microSD + case** — all four are e
 |---|---|---|---|
 | 1 | ESP32-S3-AUDIO-Board — buy the **"+battery" SKU** | ~₩25–35k | Domestic distributor (1–3 days) or AliExpress (cheapest) |
 | 2 | microSD **64GB** (SanDisk Ultra / Samsung EVO) | ~₩20k | Coupang 로켓배송 (next day) |
-| 3 | Case (custom 3D print, fits 58×43.7 mm) | ~₩5–10k | See case row below — needs an STL |
+| 3 | Case (3D print, fits 58×43.7 mm) | ~₩5–10k | STL in `hardware/case/` — print & measure |
 | — | 3.7V MX1.25 LiPo | (in the +battery SKU) | Bundled when you pick that SKU |
 
 Genuinely **optional** extras: SPI screen, MagSafe magnet, extra I2S mics.
@@ -32,7 +32,7 @@ Genuinely **optional** extras: SPI screen, MagSafe magnet, extra I2S mics.
 | **(opt) SPI LCD 1.47"/2"/2.8"** | Same Waveshare channels | `Waveshare 2inch LCD SPI` | 8–15k | Board has an SPI LCD header. Screen-less (button + LED) is fine. |
 | **(opt) MagSafe magnet ring** | 쿠팡 · 다이소 · AliExpress | `맥세이프 메탈링` | 3–5k | For card-style phone attach. |
 | **(opt) I2S MEMS mics ×2–4** | 디바이스마트 / 엘레파츠 · AliExpress · 세운상가 | `INMP441` or `ICS-43434` | ~3k each | Only to extend pickup range; board already has a dual-mic array. Needs jumper wires + soldering. |
-| **Case** — required (carry) | 3D-print service: 오프린트미(ohprintme, online upload→택배) · 메이커스 · 세운상가 출력집 (Naver "3D프린팅 출력 서비스") | upload STL | 5–10k | ⚠️ Realistically a **custom print** (cutouts for mics/speaker/USB on the 58×43.7 mm board). **No repo STL yet** (ROADMAP v1) and no official Waveshare case — design one or run it bare/in a temp box during software bring-up. |
+| **Case** — required (carry) | 3D-print service: 오프린트미(ohprintme, online upload→택배) · 메이커스 · 세운상가 출력집 (Naver "3D프린팅 출력 서비스") | upload the STL | 5–10k | ✅ Parametric STL now in [`hardware/case/`](../case/) (`uv run … generate_case.py`). Cutout positions are estimates — print the base, measure with calipers, tweak params, reprint. |
 
 ## Vendors
 
