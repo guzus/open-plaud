@@ -33,13 +33,18 @@ Early scaffold. The transcription layer is **cloud-first today** with a provider
 
 ## Quick start (server)
 
+This project is **uv-managed**. Install [uv](https://docs.astral.sh/uv/), then:
+
 ```bash
 cd server
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env   # add your transcription + LLM API keys
-uvicorn open_plaud.api.app:app --reload
+uv sync                                        # create .venv + install from uv.lock
+cp .env.example .env                           # add your transcription + LLM API keys
+uv run uvicorn open_plaud.api.app:app --reload
 ```
+
+`uv` reads the pinned interpreter from `.python-version` (installing it if missing).
+Dev tools (pytest, ruff, mypy) come with `uv sync` — run them via `uv run pytest`,
+`uv run ruff check .`, `uv run mypy .`.
 
 ## License
 
