@@ -10,7 +10,7 @@ Commercial AI recorders ship cheap hardware and monetize a cloud subscription th
 
 | | Plaud (commercial) | open-plaud |
 |---|---|---|
-| Hardware | Closed, ~$159+ | Open, ~₩30–40k DIY |
+| Hardware | Closed, ~$159+ | Open, ~₩40–70k DIY |
 | Transcription | Cloud-only, minute-capped | Pluggable: cloud now, local later |
 | Summarization | Their templates | Any LLM (Claude / GPT / local) |
 | Recordings | Their cloud | Your storage |
@@ -30,6 +30,10 @@ open-plaud/
 ## Status
 
 Early scaffold. The pipeline layer is provider-agnostic, and concrete cloud transcription/summarization providers are the next server milestone. On-device (desktop/mobile) inference can be added later without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
+
+Current v0 hardware target: **Waveshare ESP32-S3-LCD-1.54 + battery**. It keeps
+the important recorder pieces under $30: dual mic + ES7210 ADC, battery
+charging, TF/microSD, Wi-Fi, and a small status LCD.
 
 ## Quick start (server)
 

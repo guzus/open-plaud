@@ -62,7 +62,7 @@ void app_main(void)
                  esp_err_to_name(upload), REC_PATH);
     }
 
-    ESP_LOGI(TAG, "done. next: hold-to-record (TCA9555 button) + retry queue");
+    ESP_LOGI(TAG, "done. next: hold-to-record (PLUS button) + retry queue");
     audio_deinit();
     sdcard_unmount();
 }

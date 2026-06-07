@@ -7,7 +7,8 @@ system deps.
 
 ## Waveshare ESP32-S3-AUDIO-Board case
 
-This is the larger reference-board enclosure.
+This is the older larger reference-board enclosure. It is no longer the primary
+v0 hardware target, but remains useful for the AUDIO-board fallback path.
 
 ```bash
 uv run --no-project hardware/case/generate_case.py
@@ -22,6 +23,20 @@ uv run --no-project hardware/case/generate_case.py
 | `stl/open_plaud_case_lid.stl` | lid (rim friction-fit, mic holes, speaker grille) | ~5,632 |
 
 Assembled footprint ≈ **63 × 48.7 × 19 mm**.
+
+## Waveshare ESP32-S3-LCD-1.54 + battery case
+
+This is now the selected v0 hardware target, but a case STL is intentionally not
+generated yet. The product docs confirm the audio/battery/storage feature set,
+but the first useful enclosure needs board-in-hand measurements for:
+
+- board outer dimensions and corner shape
+- bundled battery dimensions and placement
+- USB-C, TF-card, mic, speaker, button, and LCD cutout positions
+- whether touch or non-touch SKU changes the front stack height
+
+Next CAD task: measure the board and bundled battery with calipers, then add
+`generate_lcd154_case.py` and committed STLs.
 
 ## XIAO ESP32-S3 Sense + direct LiPo case
 

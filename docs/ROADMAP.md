@@ -10,10 +10,11 @@
 - [ ] Minimal web UI to browse/play/export recordings
 
 ## v1 — hardware reference
-- [~] ESP-IDF firmware scaffold for ESP32-S3-AUDIO-Board (dual-mic, ES7210 ADC) — `firmware/`
+- [x] Select v0 hardware: Waveshare ESP32-S3-LCD-1.54 + battery (dual mic, ES7210, TF, LCD)
+- [~] ESP-IDF firmware scaffold for ESP32-S3-LCD-1.54 (dual-mic, ES7210 ADC) — `firmware/`
 - [~] Record WAV to microSD (bring-up path done); hold-to-record + tag still TODO
 - [~] Wi-Fi sync to `POST /v1/recordings` (implemented, not hardware-flashed yet)
-- [~] 3D-printable case — parametric STL generator in `hardware/case/` (first-article)
+- [ ] 3D-printable case for LCD-1.54 + battery (AUDIO and XIAO first-article STLs exist)
 
 ## v2 — local transcription (the deferred decision)
 The interface is already built for this. These are new providers, not rewrites.

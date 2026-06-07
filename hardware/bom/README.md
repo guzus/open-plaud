@@ -1,25 +1,31 @@
 # Bill of materials — reference build
 
-The reference target is the Waveshare ESP32-S3-AUDIO-Board: a dual-mic array
-with an ES7210 4-channel ADC, chosen over the ePaper-1.54 board because mic
-quality is the thing that matters most for a Plaud-style recorder.
+The v0 reference target is **Waveshare ESP32-S3-LCD-1.54 + battery**. It wins the
+current trade-off: under $30 direct, battery/charging included, TF/microSD,
+Wi-Fi, small LCD status UI, and the same important audio architecture class:
+dual mic + ES7210 ADC.
 
-There is also a thinner **XIAO ESP32-S3 Sense + direct LiPo** prototype path.
-It is smaller and faster to carry-test, but it uses a single digital mic and a
-stacked camera/mic module, so it is not the final PLAUD-thin hardware.
+The older AUDIO-Board remains useful as an audio reference, and the XIAO direct
+LiPo path remains useful as a tiny-body experiment, but neither is the main v0
+buy anymore.
 
 | Part | Spec | Approx cost | Notes |
 |---|---|---|---|
-| Waveshare ESP32-S3-AUDIO-Board | ESP32-S3R8, 8MB PSRAM, 16MB Flash, dual mic + ES7210 ADC + ES8311 DAC, microSD, USB-C, MX1.25 LiPo connector + charge mgmt, 58×43.7 mm | ~₩22k ($16 board-only) / ~₩25k ($18 +battery) | Two SKUs — pick **"+battery"** to bundle the cell |
-| 3.7V LiPo battery — **required** (portable) | ~500 mAh, **MX1.25 2-pin**, correct polarity | ~₩5–8k | Bundled if you chose the +battery SKU; else buy one |
-| microSD card | 64–128GB, FAT32 | ~₩20–30k | 32GB barely cheaper (~₩2만) — size up; records WAV here |
-| Case — **required** (carry) | fits 58×43.7 mm board, mic/speaker/USB cutouts | ~₩5–10k | Parametric STL in [`hardware/case/`](../case/) — print first-article + measure |
-| (optional) SPI LCD | Waveshare 1.47"/2"/2.8" | ~₩8–15k | Status/UI; not e-ink |
+| Waveshare ESP32-S3-LCD-1.54 **with battery** | ESP32-S3R8, 8MB PSRAM, 16MB Flash, dual mic + ES7210 ADC, ES8311, 1.54" LCD, TF/microSD, USB-C, battery charge/discharge | $18.99 direct / ~₩25–35k domestic | Buy **ESP32-S3-LCD-1.54** (battery included), not the `-EN` no-battery SKU |
+| microSD card | 64–128GB, FAT32 | ~₩20–30k | Records WAV locally; 64GB is the value floor |
+| Case — **required** (carry) | fits LCD-1.54 board + bundled battery, mic/speaker/USB/TF cutouts | ~₩5–15k | New LCD-1.54 STL still TODO; print after board arrives and dimensions are measured |
 | (optional) MagSafe magnet ring | — | ~₩5k | For card-style phone attach |
 
-**Portable recorder (essential): board + battery + microSD + case ≈ ₩55–70k.**
-Screen, magnet, and extra mics are the genuinely optional extras.
-Still a better-mic build than the original Pala Note.
+**Portable recorder (essential): board-with-battery + microSD + case ≈ ₩50–80k.**
+Magnet is the only genuinely optional extra for the v0 carry build.
+
+## Alternatives kept for reference
+
+| Path | Approx cost | Why keep it | Why not primary |
+|---|---:|---|---|
+| ESP32-S3-AUDIO-Board + battery | ~$17.99 / ~₩25–35k | Best pure audio reference; current case STL exists | Bulky, no built-in status display |
+| XIAO ESP32-S3 Sense + direct LiPo | ~$17–22 electronics | Small footprint; case STL exists | Single digital mic and stacked module; worse meeting audio |
+| ESP32-S3-ePaper-1.54 + battery | ~$15.99–22.99 | Better always-on low-power status UI | Single mic / weaker recorder path |
 
 ## Thin prototype path — XIAO ESP32-S3 Sense
 
@@ -38,10 +44,9 @@ Still a better-mic build than the original Pala Note.
 
 ## Why not the ePaper-1.54 board?
 
-Single MEMS mic — fine for close memos, weak for meetings. The AUDIO-Board's
-dual-mic array with noise reduction / echo cancellation is the upgrade that
-matters for Plaud-like use. Trade-off: no onboard e-ink (add an SPI LCD or run
-screen-less with button + LED feedback).
+Single mic + ES8311 is fine for close memos, weak for meetings. LCD-1.54 keeps
+the useful small display while adding the recorder-grade part we care about:
+dual mic + ES7210 capture.
 
 ## Mic upgrade path
 

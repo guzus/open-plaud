@@ -3,6 +3,30 @@
 Where to actually buy each part if you're in Seoul. Prices are approximate
 (₩, mid-2026); click the vendor search links for live prices.
 
+> **Selected v0 hardware:** [Waveshare ESP32-S3-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm)
+> **with the 3.7V battery option**. Waveshare documents the LCD-1.54 and
+> Touch-LCD-1.54 as sharing the same core features except touch: dual mic +
+> ES7210 audio capture, ES8311, TF card, USB-C, Wi-Fi/BLE, and battery
+> charge/discharge.
+
+## TL;DR — selected LCD-1.54 recorder (~₩50–80k)
+
+| # | Part | Approx | Fastest in Seoul/Korea | Search term |
+|---|---|---:|---|---|
+| 1 | **Waveshare ESP32-S3-LCD-1.54 with battery** | Waveshare $18.99 · domestic ~₩25–35k | 디바이스마트 / 엘레파츠 / 메카솔루션 / IC뱅큐 if listed; otherwise Waveshare/AliExpress | `ESP32-S3-LCD-1.54 Waveshare` |
+| 2 | **microSD 64GB** | ~₩15–25k | 쿠팡 로켓배송 / 다이소 / 하이마트 | `마이크로SD 64GB 삼성 샌디스크` |
+| 3 | **3D print case** | ~₩5–15k | 세운상가 출력집 or online 3D print service | LCD-1.54 STL is TODO; use board in-hand measurements |
+| 4 | **USB-C cable** | ~₩3–10k | already likely owned / 쿠팡 / 다이소 | `USB C 케이블 데이터` |
+| 5 | Optional MagSafe metal ring | ~₩3–5k | 쿠팡 / 다이소 | `맥세이프 메탈링` |
+
+Buy the **battery-included SKU**, not the `-EN` no-battery SKU. This avoids
+separate LiPo polarity/connector risk for the first recorder build.
+
+Immediate caveat: the repo has first-article STLs for AUDIO-board and XIAO, but
+not yet for LCD-1.54. The right next CAD step is to measure the LCD-1.54 board
+and bundled battery once it arrives, then generate the case around real caliper
+data.
+
 > **Verified:** the [Waveshare ESP32-S3-AUDIO-Board](https://www.waveshare.com/esp32-s3-audio-board.htm)
 > comes in **two SKUs — board-only ($16) and "+battery" ($18)**. The battery is an
 > **MX1.25 2-pin** 3.7V LiPo and is **not optional** for a portable recorder. The board is
@@ -13,7 +37,7 @@ Where to actually buy each part if you're in Seoul. Prices are approximate
 > is **$13.99** direct from Seeed. Seeed documents the Sense stack as
 > **21 × 17.8 × 15 mm** with camera, digital mic, and SD-card support.
 
-## TL;DR — thin XIAO prototype (~₩40–70k)
+## Alternative — thin XIAO prototype (~₩40–70k)
 
 This is the thinner path we discussed: **XIAO ESP32-S3 Sense + flat LiPo directly
 soldered to the battery pads**, inside the new STL case. It is smaller than the
@@ -47,7 +71,7 @@ Important buying notes:
 - XIAO Sense uses a single digital mic. If microphone quality is the priority,
   the Waveshare dual-mic board remains the better audio reference.
 
-## TL;DR — Waveshare reference recorder (~₩55–70k)
+## Alternative — Waveshare AUDIO-board recorder (~₩55–70k)
 
 A device you carry needs **board + battery + microSD + case** — all four are essential:
 
@@ -64,6 +88,7 @@ Genuinely **optional** extras: SPI screen, MagSafe magnet, extra I2S mics.
 
 | Part | Buy where (Seoul) | Search term | Approx ₩ | Notes |
 |---|---|---|---|---|
+| **ESP32-S3-LCD-1.54 with battery** | Waveshare/AliExpress cheapest · domestic: 디바이스마트 / 엘레파츠 / 메카솔루션 / IC뱅큐 if listed | `ESP32-S3-LCD-1.54 Waveshare`, `ESP32-S3-Touch-LCD-1.54` | 25–35k domestic / $18.99 Waveshare | **Primary v0 board.** Dual mic + ES7210, ES8311, TF, battery charging, LCD status. Prefer non-touch unless touch is the same price. |
 | **XIAO ESP32-S3 Sense** | Seeed official (cheapest direct) · domestic: 디바이스마트 / IC뱅큐 / 엘레파츠 | `XIAO ESP32S3 Sense 113991115` | 22–24k domestic / $13.99 Seeed | Thin prototype board. Official dimension: 21×17.8×15 mm with Sense expansion board. |
 | **Flat 3.7V LiPo** | 엑스캅터 / 배터리맨 / 컴스마트 / 세운상가 배터리상 | `리튬폴리머 3.7V 500mAh 503035` | 8–12k | Protected cell preferred. Direct-solder only after checking +/− with a meter. |
 | **Kapton tape + 30AWG silicone wire** | 쿠팡 / 디바이스마트 / 엘레파츠 / 세운상가 | `캡톤 테이프`, `30AWG 실리콘 와이어` | 6–13k | Needed for insulation and strain relief in the direct-LiPo build. |
@@ -84,12 +109,12 @@ Genuinely **optional** extras: SPI screen, MagSafe magnet, extra I2S mics.
 | 메카솔루션 (Mechasolution) | Domestic online | https://mechasolution.com | ESP32 / maker parts |
 | IC뱅큐 (ICbanq) | Domestic online | https://www.icbanq.com | Boards, sensors |
 | 쿠팡 (Coupang) | Domestic, next-day | https://www.coupang.com | microSD, magnet, cables |
-| AliExpress — Waveshare Official Store | Import, ~1–2 wk | https://www.aliexpress.com (search "ESP32-S3-AUDIO-Board Waveshare") | Cheapest board + Waveshare LCD/parts |
+| AliExpress — Waveshare Official Store | Import, ~1–2 wk | https://www.aliexpress.com (search "ESP32-S3-LCD-1.54 Waveshare") | Cheapest Waveshare board options |
 | 세운상가 / 청계천 전자상가 | **Offline, Jongno-gu** — same day | — | Batteries, microSD, connectors, mics, jumper wire, hands-on |
 
 ## Tips for Seoul buyers
 
-- **Want it this week:** buy the board domestically (디바이스마트/메카솔루션) even if a bit pricier; grab the microSD on Coupang for next-day.
-- **Want it cheapest:** AliExpress Waveshare Official Store for the board (+ any LCD/mics in the same order to save shipping), ~1–2 weeks.
+- **Want it this week:** buy the LCD-1.54 board domestically if listed; grab the microSD on Coupang for next-day.
+- **Want it cheapest:** Waveshare/AliExpress official channels for the LCD-1.54 battery SKU, ~1–2 weeks.
 - **Want it today / hands-on:** 세운상가 (Sewoon Sangga, 종로) — bring the part names above; good for batteries, microSD, mics, wire, and sometimes the dev board itself.
 - **Duty-free:** keep a single AliExpress order **under ₩150,000** (personal-use import threshold) to avoid customs duty. The whole build is well under that.

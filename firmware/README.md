@@ -1,4 +1,4 @@
-# Firmware — ESP-IDF (Waveshare ESP32-S3-AUDIO-Board)
+# Firmware — ESP-IDF (Waveshare ESP32-S3-LCD-1.54)
 
 The recorder firmware. ESP-IDF (C), no Arduino. Current milestone: **boot → mount
 microSD → init the ES7210 dual-mic ADC → record a fixed WAV clip to the card.**
@@ -11,8 +11,10 @@ It then joins Wi-Fi and uploads that WAV to the server as multipart/form-data.
 
 ## Prerequisites
 
-[ESP-IDF **v5.4.x**](https://docs.espressif.com/projects/esp-idf/en/v5.4.1/esp32s3/get-started/)
-(Waveshare targets v5.4.1):
+[ESP-IDF **v5.4.x+**](https://docs.espressif.com/projects/esp-idf/en/v5.4.1/esp32s3/get-started/).
+Waveshare's LCD-1.54 examples currently target ESP-IDF 5.5.1, while this repo
+still aims to keep the bring-up project on the v5.4.x line until hardware says
+otherwise.
 
 ```bash
 git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
@@ -45,9 +47,9 @@ card for manual recovery or a future retry queue.
 
 | File | Role |
 |---|---|
-| `main/board.h` | **pin map** (schematic-confirmed) — I2S/I2C/SD + TCA9555 expander bits |
+| `main/board.h` | **pin map** (Waveshare LCD-1.54 BSP + schematic) — I2S/I2C/SD/LCD/buttons |
 | `main/audio.c` | ES7210 dual-mic capture (I2C via `esp_codec_dev`, I2S-TDM RX) |
-| `main/sdcard.c` | mount microSD (FATFS, **1-bit** SDMMC: CLK=40, CMD=42, D0=41) |
+| `main/sdcard.c` | mount microSD (FATFS, **1-bit** SDMMC: CLK=16, CMD=15, D0=17) |
 | `main/wav.c` | streaming 16-bit PCM WAV writer |
 | `main/net_upload.c` | Wi-Fi STA + multipart upload to the server |
 | `main/app_main.c` | orchestration: mount → record → (upload) |
@@ -76,14 +78,15 @@ Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 ## TODO (ROADMAP v1)
 
 - [ ] Flash on hardware and tune the first real Wi-Fi/audio bring-up issues.
-- [ ] Hold-to-record button — **on the TCA9555 expander** (`BSP_EXIO_KEY1`), read over
-      I2C, not a GPIO. Speaker amp enable (`BSP_EXIO_PA_CTRL`) is there too.
-- [ ] Retry queue, rotate filenames / tag recordings; RGB ring (GPIO38, 7×WS2812) as status.
-- [ ] Confirm SD at higher clock; D1/D2 aren't GPIO-wired so stay 1-bit.
+- [ ] Hold-to-record button via direct GPIO (`BSP_PLUS_BUTTON_GPIO`, GPIO4) or PWR/BOOT UX.
+- [ ] Retry queue, rotate filenames / tag recordings; LCD status UI via ST7789.
+- [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 
 ## Sources
 
-- Pin map: Waveshare schematic `ESP32-S3-AUDIO-Board_1.1.pdf`
-  ([wiki](https://www.waveshare.com/wiki/ESP32-S3-AUDIO-Board)), cross-checked vs an
-  [ESPHome config](https://github.com/ichbaum/esphome-esp32_s3_audio_board) for this board.
+- Hardware target: [Waveshare ESP32-S3-LCD-1.54 / Touch-LCD-1.54 docs](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54)
+  (same core features except touch).
+- Pin map: Waveshare `ESP32-S3-LCD-1.54-Schematic.pdf` and
+  [`waveshareteam/ESP32-S3-Touch-LCD-1.54`](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.54)
+  ESP-IDF BSP.
 - Capture recipe: ESP-IDF `examples/peripherals/i2s/i2s_codec/i2s_es7210_tdm`.
