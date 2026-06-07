@@ -1,0 +1,23 @@
+# open-plaud firmware build defaults.
+#   idf.py set-target esp32s3 && idf.py build
+CONFIG_IDF_TARGET="esp32s3"
+
+# ESP32-S3R8: 16 MB flash + 8 MB OCTAL PSRAM
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# Custom partition table (see partitions.csv)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Console + flashing over the ESP32-S3 NATIVE USB-Serial/JTAG.
+# This board has no UART bridge chip — the USB-C port is the S3's own USB.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# FATFS long filenames for WAV files on the SD card
+CONFIG_FATFS_LFN_HEAP=y
+
+# Audio capture + SD writes want a little more main-task stack
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

@@ -1,0 +1,5 @@
+# Partition table — 16 MB flash (ESP32-S3R8). Audio is stored on the SD card, not flash.
+# Name,   Type, SubType, Offset,   Size,   Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x400000,

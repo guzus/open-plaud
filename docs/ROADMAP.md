@@ -10,10 +10,10 @@
 - [ ] Minimal web UI to browse/play/export recordings
 
 ## v1 — hardware reference
-- [ ] ESP-IDF firmware for ESP32-S3-AUDIO-Board (dual-mic, ES7210 ADC)
-- [ ] Record WAV to microSD, hold-to-record + tag
-- [ ] Wi-Fi sync to `POST /v1/recordings`
-- [ ] 3D-printable card-style case (MagSafe magnet optional)
+- [~] ESP-IDF firmware scaffold for ESP32-S3-AUDIO-Board (dual-mic, ES7210 ADC) — `firmware/`
+- [~] Record WAV to microSD (bring-up path done); hold-to-record + tag still TODO
+- [ ] Wi-Fi sync to `POST /v1/recordings` (firmware uploader stubbed)
+- [~] 3D-printable case — parametric STL generator in `hardware/case/` (first-article)
 
 ## v2 — local transcription (the deferred decision)
 The interface is already built for this. These are new providers, not rewrites.
