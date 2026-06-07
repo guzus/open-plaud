@@ -54,9 +54,15 @@ void app_main(void)
     wav_close(&wav);
     ESP_LOGI(TAG, "wrote %u bytes to %s", (unsigned) written, REC_PATH);
 
-    net_upload_wav(REC_PATH);   /* ESP_ERR_NOT_SUPPORTED today */
+    esp_err_t upload = net_upload_wav(REC_PATH);
+    if (upload == ESP_OK) {
+        ESP_LOGI(TAG, "uploaded %s", REC_PATH);
+    } else {
+        ESP_LOGW(TAG, "upload skipped/failed (%s); %s remains on SD",
+                 esp_err_to_name(upload), REC_PATH);
+    }
 
-    ESP_LOGI(TAG, "done. next: hold-to-record (TCA9555 button) + Wi-Fi upload");
+    ESP_LOGI(TAG, "done. next: hold-to-record (TCA9555 button) + retry queue");
     audio_deinit();
     sdcard_unmount();
 }

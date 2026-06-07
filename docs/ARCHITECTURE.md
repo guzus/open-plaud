@@ -44,7 +44,7 @@ class TranscriptionProvider(Protocol):
 
 Providers planned:
 
-| Stage | Now (cloud-first) | Later |
+| Stage | v0 target (cloud-first) | Later |
 |---|---|---|
 | Transcription | OpenAI Whisper API, Deepgram, Groq-Whisper | `whisper.cpp` (desktop), on-device mobile (Core ML / TFLite) |
 | Diarization | pyannote via API, AssemblyAI | local `pyannote.audio`, `whisperx` |
@@ -64,6 +64,8 @@ Switching to local later is just `transcription = "whisper_cpp"` once that provi
 ## Why cloud-first (per project decision)
 
 Local inference (whisper.cpp / on-device) is on the roadmap, not the v0 default. Cloud-first gets a working end-to-end loop fastest and keeps the device firmware identical regardless of where transcription runs. The interface is designed so the local backends slot in as additional providers.
+
+Current repository state: ingest and provider interfaces exist; concrete cloud providers are still TODO.
 
 ## Components
 

@@ -1,9 +1,9 @@
 # Roadmap
 
 ## v0 — working loop (current scaffold)
-- [x] Provider-agnostic pipeline (transcription / diarization / summarization)
-- [x] Cloud-first transcription (OpenAI Whisper API)
-- [x] Claude summarization with structured action items
+- [x] Provider-agnostic pipeline interfaces (transcription / diarization / summarization)
+- [ ] Cloud-first transcription provider (OpenAI Whisper API)
+- [ ] Claude summarization with structured action items
 - [x] FastAPI ingest endpoint (device upload target)
 - [x] In-memory store + local-FS audio blobs
 - [ ] SQLite persistence (replace in-memory store)
@@ -12,7 +12,7 @@
 ## v1 — hardware reference
 - [~] ESP-IDF firmware scaffold for ESP32-S3-AUDIO-Board (dual-mic, ES7210 ADC) — `firmware/`
 - [~] Record WAV to microSD (bring-up path done); hold-to-record + tag still TODO
-- [ ] Wi-Fi sync to `POST /v1/recordings` (firmware uploader stubbed)
+- [~] Wi-Fi sync to `POST /v1/recordings` (implemented, not hardware-flashed yet)
 - [~] 3D-printable case — parametric STL generator in `hardware/case/` (first-article)
 
 ## v2 — local transcription (the deferred decision)

@@ -1,0 +1,32 @@
+menu "open-plaud"
+
+    config OPEN_PLAUD_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Wi-Fi network name used by the recorder in station mode.
+
+    config OPEN_PLAUD_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            Wi-Fi password. Leave empty only for an open network.
+
+    config OPEN_PLAUD_SERVER_URL
+        string "Server base URL"
+        default "http://192.168.4.2:8000"
+        help
+            Base URL for the open-plaud server, without a trailing slash.
+            Example: http://192.168.1.50:8000
+
+    config OPEN_PLAUD_WIFI_MAX_RETRIES
+        int "Wi-Fi reconnect attempts"
+        default 5
+        range 1 20
+
+    config OPEN_PLAUD_UPLOAD_TIMEOUT_MS
+        int "Upload timeout in milliseconds"
+        default 30000
+        range 5000 300000
+
+endmenu

@@ -29,7 +29,7 @@ open-plaud/
 
 ## Status
 
-Early scaffold. The transcription layer is **cloud-first today** with a provider-agnostic interface, so on-device (desktop/mobile) inference can be added later without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
+Early scaffold. The pipeline layer is provider-agnostic, and concrete cloud transcription/summarization providers are the next server milestone. On-device (desktop/mobile) inference can be added later without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
 
 ## Quick start (server)
 
@@ -40,6 +40,13 @@ cd server
 uv sync                                        # create .venv + install from uv.lock
 cp .env.example .env                           # add your transcription + LLM API keys
 uv run uvicorn open_plaud.api.app:app --reload
+```
+
+Device upload target:
+
+```bash
+curl -F "file=@rec_0001.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
+# -> {"id":"...","status":"transcribing","filename":"rec_0001.wav","size_bytes":...}
 ```
 
 `uv` reads the pinned interpreter from `.python-version` (installing it if missing).

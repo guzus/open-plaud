@@ -9,7 +9,7 @@ Later: `whisper_cpp`, on-device mobile — added as new registrations, no caller
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from open_plaud.types import AudioRef, TranscribeOptions, Transcript
 
@@ -40,10 +40,11 @@ def available() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def create(name: str, **kwargs) -> TranscriptionProvider:
+def create(name: str, **kwargs: object) -> TranscriptionProvider:
     if name not in _REGISTRY:
         raise KeyError(
             f"unknown transcription provider '{name}'. "
             f"available: {', '.join(available()) or '(none)'}"
         )
-    return _REGISTRY[name](**kwargs)  # type: ignore[call-arg]
+    provider_cls = cast(type[Any], _REGISTRY[name])
+    return cast(TranscriptionProvider, provider_cls(**kwargs))
