@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-plaud</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 820px; margin: 2rem auto;
+           padding: 0 1rem; }
+    h1 { margin-bottom: 0; }
+    .sub { color: #888; margin-top: .25rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; }
+    th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #8883; }
+    th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #888; }
+    a { color: inherit; }
+    .status { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px;
+              background: #8882; }
+    .status-done { background: #2e7d3233; color: #2e7d32; }
+    .status-failed { background: #c6282833; color: #c62828; }
+    .status-received, .status-transcribing, .status-summarizing { background: #ed6c0233;
+              color: #ed6c02; }
+    .empty { color: #888; margin-top: 2rem; }
+    code { background: #8882; padding: .1rem .35rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>open-plaud</h1>
+  <p class="sub">Self-hosted voice recordings &mdash; transcribe &amp; summarize</p>
+  {% if recordings %}
+  <table>
+    <thead>
+      <tr><th>Recording</th><th>Status</th><th>Created</th><th>Size</th></tr>
+    </thead>
+    <tbody>
+      {% for r in recordings %}
+      <tr>
+        <td><a href="/rec/{{ r.id }}">{{ r.filename }}</a></td>
+        <td><span class="status status-{{ r.status.value }}">{{ r.status.value }}</span></td>
+        <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ r.size_bytes }} B</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No recordings yet. Upload one with
+    <code>POST /v1/recordings</code> (multipart field <code>file</code>).</p>
+  {% endif %}
+</body>
+</html>

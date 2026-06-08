@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ rec.filename }} &mdash; open-plaud</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 15px/1.6 system-ui, sans-serif; max-width: 820px; margin: 2rem auto;
+           padding: 0 1rem; }
+    a { color: inherit; }
+    .meta { color: #888; }
+    .status { font-size: .8rem; padding: .1rem .5rem; border-radius: 999px; background: #8882; }
+    .status-done { background: #2e7d3233; color: #2e7d32; }
+    .status-failed { background: #c6282833; color: #c62828; }
+    .status-received, .status-transcribing, .status-summarizing { background: #ed6c0233;
+              color: #ed6c02; }
+    audio { width: 100%; margin: 1rem 0; }
+    .actions { display: flex; gap: 1rem; align-items: center; margin: 1rem 0; }
+    button { font: inherit; padding: .4rem .9rem; border: 1px solid #8886; border-radius: 6px;
+             background: #8881; cursor: pointer; }
+    section { margin-top: 1.75rem; }
+    pre.transcript { white-space: pre-wrap; background: #8881; padding: 1rem;
+                     border-radius: 6px; }
+    .error { background: #c6282822; padding: 1rem; border-radius: 6px; }
+    ul { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <p><a href="/">&larr; All recordings</a></p>
+  <h1>{{ rec.filename }}</h1>
+  <p class="meta">
+    <span class="status status-{{ rec.status.value }}">{{ rec.status.value }}</span>
+    &middot; {{ rec.created_at.strftime('%Y-%m-%d %H:%M') }}
+    &middot; {{ rec.size_bytes }} B
+  </p>
+
+  <audio controls src="/v1/recordings/{{ rec.id }}/audio"></audio>
+
+  <div class="actions">
+    <form method="post" action="/rec/{{ rec.id }}/reprocess">
+      <button type="submit">Transcribe &amp; summarize</button>
+    </form>
+    <a href="/v1/recordings/{{ rec.id }}/export.md">Export Markdown</a>
+  </div>
+
+  {% if rec.error %}
+  <section class="error">
+    <h2>Error</h2>
+    <pre>{{ rec.error }}</pre>
+  </section>
+  {% endif %}
+
+  {% if rec.summary %}
+  <section>
+    <h2>Summary</h2>
+    <p>{{ rec.summary.summary }}</p>
+    {% if rec.summary.action_items %}
+    <h3>Action items</h3>
+    <ul>
+      {% for a in rec.summary.action_items %}
+      <li>{{ a.text }}{% if a.owner %} &mdash; <em>{{ a.owner }}</em>{% endif %}{% if a.due %}
+        (due {{ a.due }}){% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if rec.transcript and rec.transcript.text %}
+  <section>
+    <h2>Transcript{% if rec.transcript.language %}
+      <small class="meta">({{ rec.transcript.language }})</small>{% endif %}</h2>
+    <pre class="transcript">{{ rec.transcript.text }}</pre>
+  </section>
+  {% endif %}
+</body>
+</html>

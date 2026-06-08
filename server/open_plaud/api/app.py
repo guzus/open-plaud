@@ -1,13 +1,63 @@
+"""open-plaud HTTP API.
+
+The device uploads audio to ``POST /v1/recordings``; the server stores the blob,
+persists a row in the SQLite store, and kicks off the transcribe -> summarize
+pipeline as a background task so the upload returns immediately. The device (or
+the bundled web UI) then polls ``GET /v1/recordings/{id}`` for progress and the
+final transcript + summary.
+
+State lives in two module-level singletons resolved from config:
+  - ``store``    durable SQLite persistence (survives restart)
+  - ``pipeline`` the provider-agnostic orchestrator (none/none by default)
+Both are constructed once at import; with the default ``none`` providers nothing
+needs an API key, so import is always safe and tests stay offline.
+"""
 from __future__ import annotations
 
+from collections.abc import Iterable
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict
 
 from open_plaud.config import Config
-from open_plaud.types import AudioRef, JobStatus, Recording
+from open_plaud.pipeline.orchestrator import Pipeline
+from open_plaud.store import RecordingStore
+from open_plaud.types import AudioRef, JobStatus, Recording, Summary
+
+_AUDIO_SUFFIXES = {".wav", ".flac", ".m4a", ".mp3"}
+_AUDIO_MEDIA_TYPES = {"audio/wav", "audio/x-wav", "audio/flac", "audio/mpeg", "audio/mp4"}
+_SUFFIX_MEDIA_TYPES = {
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+}
+
+
+class TranscriptResponse(BaseModel):
+    text: str
+    language: str | None = None
+
+
+class ActionItemResponse(BaseModel):
+    text: str
+    owner: str | None = None
+    due: str | None = None
+
+
+class SummaryResponse(BaseModel):
+    summary: str
+    action_items: list[ActionItemResponse]
 
 
 class RecordingResponse(BaseModel):
@@ -17,11 +67,17 @@ class RecordingResponse(BaseModel):
     status: JobStatus
     filename: str
     size_bytes: int
+    created_at: datetime
+    transcript: TranscriptResponse | None = None
+    summary: SummaryResponse | None = None
+    error: str | None = None
 
 
 app = FastAPI(title="open-plaud API", version="0.0.1")
 config = Config()
-recordings: dict[str, Recording] = {}
+store = RecordingStore(config)
+pipeline = Pipeline(config)
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 def _storage_dir() -> Path:
@@ -32,20 +88,67 @@ def _storage_dir() -> Path:
 
 def _safe_suffix(filename: str | None) -> str:
     suffix = Path(filename or "").suffix.lower()
-    return suffix if suffix in {".wav", ".flac", ".m4a", ".mp3"} else ".wav"
+    return suffix if suffix in _AUDIO_SUFFIXES else ".wav"
 
 
-def _to_response(recording: Recording) -> RecordingResponse:
+def _audio_media_type(rec: Recording) -> str:
+    # Never reflect the client-supplied content_type unchecked — that would let an
+    # upload serve e.g. text/html from our origin. Allowlist it, else derive from
+    # the server-controlled suffix, else fall back to an opaque type.
+    if rec.audio.content_type in _AUDIO_MEDIA_TYPES:
+        return rec.audio.content_type
+    return _SUFFIX_MEDIA_TYPES.get(rec.audio.path.suffix.lower(), "application/octet-stream")
+
+
+def _to_response(rec: Recording) -> RecordingResponse:
+    transcript = (
+        TranscriptResponse(text=rec.transcript.text, language=rec.transcript.language)
+        if rec.transcript is not None
+        else None
+    )
+    summary: SummaryResponse | None = None
+    if isinstance(rec.summary, Summary):
+        summary = SummaryResponse(
+            summary=rec.summary.summary,
+            action_items=[
+                ActionItemResponse(text=item.text, owner=item.owner, due=item.due)
+                for item in rec.summary.action_items
+            ],
+        )
     return RecordingResponse(
-        id=recording.id,
-        status=recording.status,
-        filename=recording.audio.filename,
-        size_bytes=recording.audio.size_bytes,
+        id=rec.id,
+        status=rec.status,
+        filename=rec.audio.filename,
+        size_bytes=rec.audio.size_bytes,
+        created_at=rec.created_at,
+        transcript=transcript,
+        summary=summary,
+        error=rec.error,
     )
 
 
+async def _process(recording_id: str) -> None:
+    """Run the pipeline for one recording and persist the result.
+
+    Scheduled as a background task so the upload responds immediately. We persist
+    ``TRANSCRIBING`` up front so a poller sees that work has started, let the
+    orchestrator drive the remaining status transitions in-memory, then persist
+    the terminal state (``done`` or ``failed``). The orchestrator never touches
+    the store — it stays a pure, persistence-agnostic stage runner.
+    """
+    rec = store.get(recording_id)
+    if rec is None:
+        return
+    rec.status = JobStatus.TRANSCRIBING
+    store.update(rec)
+    await pipeline.run(rec, summarize=True)
+    store.update(rec)
+
+
 @app.post("/v1/recordings", response_model=RecordingResponse)
-async def create_recording(file: UploadFile = File(...)) -> RecordingResponse:
+async def create_recording(
+    background_tasks: BackgroundTasks, file: UploadFile = File(...)
+) -> RecordingResponse:
     recording_id = uuid4().hex
     filename = file.filename or f"{recording_id}.wav"
     destination = _storage_dir() / f"{recording_id}{_safe_suffix(filename)}"
@@ -68,15 +171,104 @@ async def create_recording(file: UploadFile = File(...)) -> RecordingResponse:
             content_type=file.content_type,
             size_bytes=size,
         ),
-        status=JobStatus.TRANSCRIBING,
+        status=JobStatus.RECEIVED,
     )
-    recordings[recording_id] = recording
+    store.add(recording)
+    # Return now; the device polls GET for transcript/summary as they land.
+    background_tasks.add_task(_process, recording_id)
     return _to_response(recording)
+
+
+@app.get("/v1/recordings", response_model=list[RecordingResponse])
+async def list_recordings() -> list[RecordingResponse]:
+    return [_to_response(rec) for rec in store.list()]
 
 
 @app.get("/v1/recordings/{recording_id}", response_model=RecordingResponse)
 async def get_recording(recording_id: str) -> RecordingResponse:
-    recording = recordings.get(recording_id)
-    if recording is None:
+    rec = store.get(recording_id)
+    if rec is None:
         raise HTTPException(status_code=404, detail="recording not found")
-    return _to_response(recording)
+    return _to_response(rec)
+
+
+@app.get("/v1/recordings/{recording_id}/audio")
+async def get_recording_audio(recording_id: str) -> FileResponse:
+    # Path comes from the store keyed by id (never from the request), so there is
+    # no user-controlled path to traverse.
+    rec = store.get(recording_id)
+    if rec is None or not rec.audio.path.exists():
+        raise HTTPException(status_code=404, detail="audio not found")
+    return FileResponse(
+        rec.audio.path,
+        media_type=_audio_media_type(rec),
+        filename=rec.audio.filename,
+    )
+
+
+@app.get("/v1/recordings/{recording_id}/export.md")
+async def export_recording_markdown(recording_id: str) -> PlainTextResponse:
+    rec = store.get(recording_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="recording not found")
+    return PlainTextResponse(
+        _render_markdown(rec),
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{rec.id}.md"'},
+    )
+
+
+def _render_markdown(rec: Recording) -> str:
+    lines: list[str] = [
+        f"# {rec.audio.filename}",
+        "",
+        f"- **Status:** {rec.status.value}",
+        f"- **Created:** {rec.created_at.isoformat()}",
+    ]
+    if isinstance(rec.summary, Summary):
+        lines += ["", "## Summary", "", rec.summary.summary]
+        if rec.summary.action_items:
+            lines += ["", "## Action items", ""]
+            for item in rec.summary.action_items:
+                meta = ", ".join(
+                    part
+                    for part in (
+                        f"owner: {item.owner}" if item.owner else "",
+                        f"due: {item.due}" if item.due else "",
+                    )
+                    if part
+                )
+                lines.append(f"- [ ] {item.text}" + (f" ({meta})" if meta else ""))
+    if rec.transcript is not None and rec.transcript.text:
+        lines += ["", "## Transcript", "", rec.transcript.text]
+    if rec.error:
+        lines += ["", "## Error", "", rec.error]
+    return "\n".join(lines) + "\n"
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request) -> HTMLResponse:
+    recordings: Iterable[RecordingResponse] = [_to_response(r) for r in store.list()]
+    return templates.TemplateResponse(
+        request, "index.html", {"recordings": recordings}
+    )
+
+
+@app.get("/rec/{recording_id}", response_class=HTMLResponse)
+async def recording_detail(request: Request, recording_id: str) -> HTMLResponse:
+    rec = store.get(recording_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="recording not found")
+    return templates.TemplateResponse(
+        request, "recording.html", {"rec": _to_response(rec)}
+    )
+
+
+@app.post("/rec/{recording_id}/reprocess")
+async def reprocess_recording(
+    recording_id: str, background_tasks: BackgroundTasks
+) -> RedirectResponse:
+    if store.get(recording_id) is None:
+        raise HTTPException(status_code=404, detail="recording not found")
+    background_tasks.add_task(_process, recording_id)
+    return RedirectResponse(url=f"/rec/{recording_id}", status_code=303)
