@@ -48,10 +48,21 @@ void app_main(void)
         size_t want = sizeof buf;
         if (want > target - written) want = target - written;   /* exact length on the last read */
         if (audio_read(buf, want, &got) != ESP_OK || got == 0) continue;
-        wav_write(&wav, buf, got);
+        if (wav_write(&wav, buf, got) != ESP_OK) {  /* SD write failed — card trouble */
+            ESP_LOGE(TAG, "SD write failed — aborting recording");
+            break;
+        }
         written += got;
     }
-    wav_close(&wav);
+    /* wav_close patches the RIFF/data sizes in the header. If that fails, the file
+     * still carries the open-time placeholder (data_bytes = 0) and is corrupt — do
+     * not upload it; leave it on the card for inspection. */
+    if (wav_close(&wav) != ESP_OK) {
+        ESP_LOGE(TAG, "wav close failed — not uploading corrupt clip; %s left on SD", REC_PATH);
+        audio_deinit();
+        sdcard_unmount();
+        return;
+    }
     ESP_LOGI(TAG, "wrote %u bytes to %s", (unsigned) written, REC_PATH);
 
     esp_err_t upload = net_upload_wav(REC_PATH);
