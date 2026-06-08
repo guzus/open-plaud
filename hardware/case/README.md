@@ -26,17 +26,35 @@ Assembled footprint ≈ **63 × 48.7 × 19 mm**.
 
 ## Waveshare ESP32-S3-LCD-1.54 + battery case
 
-This is now the selected v0 hardware target, but a case STL is intentionally not
-generated yet. The product docs confirm the audio/battery/storage feature set,
-but the first useful enclosure needs board-in-hand measurements for:
+This is now the selected v0 hardware target. The first-article STL is generated
+around the published product class and observed integrated-battery layout:
+
+```bash
+uv run --no-project hardware/case/generate_lcd154_case.py
+```
+
+Committed copies:
+
+| File | Part | Bounding box |
+|---|---|---|
+| `stl/open_plaud_lcd154_base.stl` | tray with internal battery pocket, board ledges, USB-C/TF cutouts | 49.0 × 49.0 × 21.5 mm |
+| `stl/open_plaud_lcd154_lid.stl` | friction-fit lid with LCD window, mic holes, buttons, grille | 49.0 × 49.0 × 4.7 mm |
+| `stl/open_plaud_lcd154_preview.png` | quick generated mesh preview | — |
+
+Assembled footprint ≈ **49 × 49 × 23 mm**. This intentionally stays close to
+the Waveshare enclosure class (~46 × 46 × 22.5 mm) while leaving first-print
+clearance for a FDM-printed shell.
+
+The product docs confirm the audio/battery/storage feature set, but the second
+article should use board-in-hand measurements for:
 
 - board outer dimensions and corner shape
 - bundled battery dimensions and placement
 - USB-C, TF-card, mic, speaker, button, and LCD cutout positions
 - whether touch or non-touch SKU changes the front stack height
 
-Next CAD task: measure the board and bundled battery with calipers, then add
-`generate_lcd154_case.py` and committed STLs.
+Print the base first, test fit the board/battery, then tune the parameters at the
+top of `generate_lcd154_case.py`.
 
 ## XIAO ESP32-S3 Sense + direct LiPo case
 
@@ -89,8 +107,8 @@ how your specific LiPo lead exits the pouch.
 
 Workflow: print the **base** as a first article → seat your board → measure the
 real connector offsets with calipers → edit the `*_POS_*` / `USBC_*` / `SD_*`
-parameters at the top of `generate_case.py` → regenerate → reprint. It's
-parametric precisely so this loop is cheap.
+parameters in the relevant generator → regenerate → reprint. It's parametric
+precisely so this loop is cheap.
 
 ## Key parameters (`generate_case.py`)
 
