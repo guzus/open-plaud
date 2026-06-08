@@ -1,29 +1,35 @@
+"""Summarization providers.
+
+Mirrors `transcription/`: the orchestrator depends only on the
+`SummarizationProvider` Protocol; concrete backends register themselves under a
+name via the `@register` decorator and are resolved from config by `create`.
+
+Today: `none` (passthrough) and `claude` (Anthropic Messages API).
+Later: additional cloud or on-device summarizers — added as new registrations,
+no caller change.
+"""
 from __future__ import annotations
 
 from typing import Any, Protocol, cast, runtime_checkable
 
-from open_plaud.types import Transcript
+from open_plaud.types import Summary, Transcript
 
 
 @runtime_checkable
 class SummarizationProvider(Protocol):
     name: str
 
-    async def summarize(self, transcript: Transcript, *, instructions: str | None = None) -> object:
+    async def summarize(
+        self, transcript: Transcript, *, instructions: str | None = None
+    ) -> Summary:
         ...
 
 
-class NoopSummarizer:
-    name = "none"
-
-    async def summarize(self, transcript: Transcript, *, instructions: str | None = None) -> object:
-        return {"summary": transcript.text, "action_items": []}
-
-
-_REGISTRY: dict[str, type[SummarizationProvider]] = {"none": NoopSummarizer}
+_REGISTRY: dict[str, type[SummarizationProvider]] = {}
 
 
 def register(cls: type[SummarizationProvider]) -> type[SummarizationProvider]:
+    """Class decorator: register a provider under its `name`."""
     name = getattr(cls, "name", None)
     if not name:
         raise ValueError(f"{cls.__name__} must define a class-level `name`")
