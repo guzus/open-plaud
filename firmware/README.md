@@ -64,7 +64,8 @@ upload raw audio. The server does transcription/summarization.
 POST {OP_SERVER}/v1/recordings
 Content-Type: multipart/form-data
   file=@rec_0001.wav            # 16 kHz, 16-bit, 2-channel PCM WAV
-→ 200 { "id": "...", "status": "transcribing", "filename": "rec_0001.wav", "size_bytes": ... }
+→ 200 { "id": "...", "status": "received", "filename": "rec_0001.wav", "size_bytes": ... }
+       # the server transcribes/summarizes in the background; poll GET for the result
 ```
 
 Firmware settings live under `idf.py menuconfig` → **open-plaud**:
@@ -74,6 +75,25 @@ Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 - `OPEN_PLAUD_SERVER_URL` (base URL, for example `http://192.168.1.50:8000`)
 - `OPEN_PLAUD_WIFI_MAX_RETRIES`
 - `OPEN_PLAUD_UPLOAD_TIMEOUT_MS`
+
+## Validate on first hardware bring-up
+
+A source review (server contract cross-checked) found the upload seam correct —
+multipart field `file`, `.wav`, path `/v1/recordings` all match the server. Open
+items to confirm with a board in hand:
+
+- **Audio init (highest uncertainty).** `audio.c` drives both `esp_codec_dev_open`
+  *and* a raw `i2s_channel_enable` over a hand-rolled TDM config. Depending on the
+  installed `esp_codec_dev` version these can double-configure/enable the RX path —
+  watch for an error at `i2s_channel_enable`/`esp_codec_dev_open` and drop one side
+  if so.
+- **`audio_read` failure path** busy-loops with no backoff (`app_main.c`); add a
+  retry bound once you see real I2S behavior.
+- **Transcription cost:** capture is 2-channel; consider down-mixing the two mics to
+  mono before upload (halves file size and Whisper cost) unless diarization needs both.
+
+A corrupt-clip guard is already in place: `app_main.c` now aborts on a failed SD
+write and refuses to upload if the WAV header can't be patched on close.
 
 ## TODO (ROADMAP v1)
 
