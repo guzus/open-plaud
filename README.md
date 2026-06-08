@@ -29,7 +29,13 @@ open-plaud/
 
 ## Status
 
-Early scaffold. The pipeline layer is provider-agnostic, and concrete cloud transcription/summarization providers are the next server milestone. On-device (desktop/mobile) inference can be added later without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
+The server loop works end to end: upload → transcribe → summarize → browse. Cloud
+transcription (OpenAI Whisper) and summarization (Claude) providers are implemented
+behind the pipeline's protocols and selected by config; recordings persist in SQLite
+and survive restarts; a small web UI lists, plays, and exports them. The default
+providers are `none` (no key required) so the server runs offline out of the box.
+On-device (desktop/mobile) inference can be added later as additional providers
+without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
 
 Current v0 hardware target: **Waveshare ESP32-S3-LCD-1.54 + battery**. It keeps
 the important recorder pieces under $30: dual mic + ES7210 ADC, battery
@@ -46,11 +52,22 @@ cp .env.example .env                           # add your transcription + LLM AP
 uv run uvicorn open_plaud.api.app:app --reload
 ```
 
-Device upload target:
+Then open **http://127.0.0.1:8000/** for the web UI (list, play, transcript,
+summary, Markdown export), or use the device upload target directly:
 
 ```bash
 curl -F "file=@rec_0001.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
-# -> {"id":"...","status":"transcribing","filename":"rec_0001.wav","size_bytes":...}
+# -> {"id":"...","status":"received","filename":"rec_0001.wav","size_bytes":...}
+# the pipeline runs in the background; poll GET /v1/recordings/{id} for the result
+```
+
+By default the pipeline is a no-op (stores audio, empty transcript) so it runs
+with no API keys. To actually transcribe + summarize, set the keys in `.env` and
+select the cloud providers:
+
+```bash
+OP_PIPELINE__TRANSCRIPTION=openai_whisper   # needs OPENAI_API_KEY
+OP_PIPELINE__SUMMARIZATION=claude           # needs ANTHROPIC_API_KEY
 ```
 
 `uv` reads the pinned interpreter from `.python-version` (installing it if missing).

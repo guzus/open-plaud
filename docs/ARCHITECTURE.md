@@ -65,15 +65,15 @@ Switching to local later is just `transcription = "whisper_cpp"` once that provi
 
 Local inference (whisper.cpp / on-device) is on the roadmap, not the v0 default. Cloud-first gets a working end-to-end loop fastest and keeps the device firmware identical regardless of where transcription runs. The interface is designed so the local backends slot in as additional providers.
 
-Current repository state: ingest and provider interfaces exist; concrete cloud providers are still TODO.
+Current repository state: the loop runs end to end. The `openai_whisper` (transcription) and `claude` (summarization) cloud providers are implemented behind the protocols; the upload endpoint runs the pipeline as a background task; recordings persist in SQLite. Local backends remain future providers behind the same interfaces.
 
 ## Components
 
-- `server/open_plaud/api` — FastAPI app, routes, schemas
+- `server/open_plaud/api` — FastAPI app, routes, schemas, + Jinja2 web UI (`templates/`)
 - `server/open_plaud/pipeline` — orchestrator + job state machine
-- `server/open_plaud/transcription` — provider protocol + cloud impls
+- `server/open_plaud/transcription` — provider protocol + `none` / `openai_whisper`
 - `server/open_plaud/diarization` — provider protocol (no-op default)
-- `server/open_plaud/summarization` — LLM provider protocol + impls
-- `server/open_plaud/storage` — audio blob + metadata persistence
+- `server/open_plaud/summarization` — LLM provider protocol + `none` / `claude`
+- `server/open_plaud/store.py` — SQLite persistence; audio blobs on local FS
 - `firmware/` — ESP-IDF project for the recorder
 - `hardware/` — BOM, case, wiring

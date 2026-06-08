@@ -2,12 +2,12 @@
 
 ## v0 — working loop (current scaffold)
 - [x] Provider-agnostic pipeline interfaces (transcription / diarization / summarization)
-- [ ] Cloud-first transcription provider (OpenAI Whisper API)
-- [ ] Claude summarization with structured action items
-- [x] FastAPI ingest endpoint (device upload target)
-- [x] In-memory store + local-FS audio blobs
-- [ ] SQLite persistence (replace in-memory store)
-- [ ] Minimal web UI to browse/play/export recordings
+- [x] Cloud-first transcription provider (OpenAI Whisper API) — `openai_whisper`
+- [x] Claude summarization with structured action items (tool-forced `{summary, action_items[]}`)
+- [x] FastAPI ingest endpoint runs the pipeline as a background task on upload
+- [x] Local-FS audio blobs
+- [x] SQLite persistence (replaces the in-memory store; survives restart)
+- [x] Minimal web UI to browse/play/export recordings (`GET /`, `/rec/{id}`)
 
 ## v1 — hardware reference
 - [x] Select v0 hardware: Waveshare ESP32-S3-LCD-1.54 + battery (dual mic, ES7210, TF, LCD)
