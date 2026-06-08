@@ -7,6 +7,37 @@ import pytest
 from fastapi.testclient import TestClient
 
 from open_plaud.api.app import app, config, store
+from open_plaud.types import ActionItem, AudioRef, Summary, TranscribeOptions, Transcript
+
+
+class _StubTranscriber:
+    """Returns content-bearing text so the orchestrator's summarize branch runs."""
+
+    name = "stub"
+
+    async def transcribe(self, audio: AudioRef, opts: TranscribeOptions) -> Transcript:
+        return Transcript(text="hello world", language="en")
+
+
+class _StubSummarizer:
+    name = "stub"
+
+    async def summarize(
+        self, transcript: Transcript, *, instructions: str | None = None
+    ) -> Summary:
+        return Summary(
+            summary="A concise summary.",
+            action_items=[ActionItem(text="email Bob", owner="Alice", due=None)],
+        )
+
+
+def _use_stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    # _process reads the module-level `pipeline`, so patching its stages here makes
+    # the real upload->pipeline->persist->response path run with non-empty content.
+    from open_plaud.api import app as app_module
+
+    monkeypatch.setattr(app_module.pipeline, "transcriber", _StubTranscriber())
+    monkeypatch.setattr(app_module.pipeline, "summarizer", _StubSummarizer())
 
 
 @pytest.fixture(autouse=True)
@@ -145,3 +176,46 @@ def test_export_markdown() -> None:
     assert md.status_code == 200
     assert md.text.startswith("# standup.wav")
     assert md.headers["content-type"].startswith("text/markdown")
+
+
+def test_full_pipeline_produces_transcript_and_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The core value path: upload -> transcribe -> summarize -> response/export/UI,
+    # exercised with content (the default noop providers produce empty text, which
+    # skips summarization, so this is the only test that runs the summary branch).
+    _use_stub_pipeline(monkeypatch)
+    client = TestClient(app)
+    rid = _post_wav(client, name="meeting.wav")
+
+    got = client.get(f"/v1/recordings/{rid}").json()
+    assert got["status"] == "done"
+    assert got["transcript"] == {"text": "hello world", "language": "en"}
+    assert got["summary"]["summary"] == "A concise summary."
+    assert got["summary"]["action_items"][0] == {
+        "text": "email Bob",
+        "owner": "Alice",
+        "due": None,
+    }
+
+    md = client.get(f"/v1/recordings/{rid}/export.md").text
+    assert "A concise summary." in md
+    assert "email Bob" in md
+
+    detail = client.get(f"/rec/{rid}").text
+    assert "A concise summary." in detail
+    assert "email Bob" in detail
+
+
+def test_reprocess_reruns_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_stub_pipeline(monkeypatch)
+    client = TestClient(app)
+    rid = _post_wav(client)
+
+    redirect = client.post(f"/rec/{rid}/reprocess", follow_redirects=False)
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == f"/rec/{rid}"
+
+    got = client.get(f"/v1/recordings/{rid}").json()
+    assert got["status"] == "done"
+    assert got["summary"]["summary"] == "A concise summary."
