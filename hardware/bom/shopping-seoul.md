@@ -3,17 +3,17 @@
 Where to actually buy each part if you're in Seoul. Prices are approximate
 (₩, mid-2026); click the vendor search links for live prices.
 
-> **Selected v0 hardware:** [Waveshare ESP32-S3-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm)
-> **with the 3.7V battery option**. Waveshare documents the LCD-1.54 and
+> **Selected v0 hardware:** [Waveshare ESP32-S3-LCD-1.54 SKU 33867](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33867)
+> **without touch control, with the 3.7V battery option**. Waveshare documents the LCD-1.54 and
 > Touch-LCD-1.54 as sharing the same core features except touch: dual mic +
 > ES7210 audio capture, ES8311, TF card, USB-C, Wi-Fi/BLE, and battery
-> charge/discharge.
+> charge/discharge. Current Waveshare price observed: **$15.99 + shipping**.
 
-## TL;DR — selected LCD-1.54 recorder (~₩50–80k)
+## TL;DR — selected LCD-1.54 recorder (~₩45–70k before custom case)
 
 | # | Part | Approx | Fastest in Seoul/Korea | Search term |
 |---|---|---:|---|---|
-| 1 | **Waveshare ESP32-S3-LCD-1.54 with battery** | Waveshare $18.99 · domestic ~₩25–35k | 디바이스마트 / 엘레파츠 / 메카솔루션 / IC뱅큐 if listed; otherwise Waveshare/AliExpress | `ESP32-S3-LCD-1.54 Waveshare` |
+| 1 | **Waveshare ESP32-S3-LCD-1.54 with battery** | Waveshare **$15.99 + shipping** · AliExpress ~₩26k | Waveshare official SKU 33867, or AliExpress if shipping is better | `ESP32-S3-LCD-1.54 Waveshare battery` |
 | 2 | **microSD 64GB** | ~₩15–25k | 쿠팡 로켓배송 / 다이소 / 하이마트 | `마이크로SD 64GB 삼성 샌디스크` |
 | 3 | **3D print case** | ~₩5–15k | 세운상가 출력집 or online 3D print service | LCD-1.54 STL is TODO; use board in-hand measurements |
 | 4 | **USB-C cable** | ~₩3–10k | already likely owned / 쿠팡 / 다이소 | `USB C 케이블 데이터` |
@@ -88,7 +88,7 @@ Genuinely **optional** extras: SPI screen, MagSafe magnet, extra I2S mics.
 
 | Part | Buy where (Seoul) | Search term | Approx ₩ | Notes |
 |---|---|---|---|---|
-| **ESP32-S3-LCD-1.54 with battery** | Waveshare/AliExpress cheapest · domestic: 디바이스마트 / 엘레파츠 / 메카솔루션 / IC뱅큐 if listed | `ESP32-S3-LCD-1.54 Waveshare`, `ESP32-S3-Touch-LCD-1.54` | 25–35k domestic / $18.99 Waveshare | **Primary v0 board.** Dual mic + ES7210, ES8311, TF, battery charging, LCD status. Prefer non-touch unless touch is the same price. |
+| **ESP32-S3-LCD-1.54 with battery** | [Waveshare official SKU 33867](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33867) · AliExpress if shipping is cheaper | `ESP32-S3-LCD-1.54 Waveshare`, `ESP32-S3-Touch-LCD-1.54` | $15.99 + shipping / ~₩26k on AliExpress | **Primary v0 board.** Dual mic + ES7210, ES8311, TF, battery charging, LCD status. Prefer non-touch. |
 | **XIAO ESP32-S3 Sense** | Seeed official (cheapest direct) · domestic: 디바이스마트 / IC뱅큐 / 엘레파츠 | `XIAO ESP32S3 Sense 113991115` | 22–24k domestic / $13.99 Seeed | Thin prototype board. Official dimension: 21×17.8×15 mm with Sense expansion board. |
 | **Flat 3.7V LiPo** | 엑스캅터 / 배터리맨 / 컴스마트 / 세운상가 배터리상 | `리튬폴리머 3.7V 500mAh 503035` | 8–12k | Protected cell preferred. Direct-solder only after checking +/− with a meter. |
 | **Kapton tape + 30AWG silicone wire** | 쿠팡 / 디바이스마트 / 엘레파츠 / 세운상가 | `캡톤 테이프`, `30AWG 실리콘 와이어` | 6–13k | Needed for insulation and strain relief in the direct-LiPo build. |

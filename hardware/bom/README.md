@@ -11,12 +11,12 @@ buy anymore.
 
 | Part | Spec | Approx cost | Notes |
 |---|---|---|---|
-| Waveshare ESP32-S3-LCD-1.54 **with battery** | ESP32-S3R8, 8MB PSRAM, 16MB Flash, dual mic + ES7210 ADC, ES8311, 1.54" LCD, TF/microSD, USB-C, battery charge/discharge | $18.99 direct / ~₩25–35k domestic | Buy **ESP32-S3-LCD-1.54** (battery included), not the `-EN` no-battery SKU |
+| Waveshare ESP32-S3-LCD-1.54 **with battery** | ESP32-S3R8, 8MB PSRAM, 16MB Flash, dual mic + ES7210 ADC, ES8311, 1.54" LCD, TF/microSD, USB-C, battery charge/discharge | $15.99 direct + shipping / ~₩25–35k via AliExpress | Buy Waveshare SKU **33867**: without touch control + 3.7V battery included, not the `-EN` no-battery SKU |
 | microSD card | 64–128GB, FAT32 | ~₩20–30k | Records WAV locally; 64GB is the value floor |
 | Case — **required** (carry) | fits LCD-1.54 board + bundled battery, mic/speaker/USB/TF cutouts | ~₩5–15k | New LCD-1.54 STL still TODO; print after board arrives and dimensions are measured |
 | (optional) MagSafe magnet ring | — | ~₩5k | For card-style phone attach |
 
-**Portable recorder (essential): board-with-battery + microSD + case ≈ ₩50–80k.**
+**Portable recorder (essential): board-with-battery + shipping + microSD ≈ ₩45–70k before any custom case.**
 Magnet is the only genuinely optional extra for the v0 carry build.
 
 ## Alternatives kept for reference

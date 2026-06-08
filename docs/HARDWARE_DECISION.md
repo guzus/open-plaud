@@ -20,7 +20,7 @@ The LCD-1.54 board satisfies the core constraints:
 
 | Constraint | LCD-1.54 answer |
 |---|---|
-| Core price | $18.99 direct with battery option |
+| Core price | $15.99 direct for SKU 33867, shipping separate |
 | Audio | dual microphone capture through ES7210 ADC |
 | Storage | onboard TF/microSD slot |
 | Upload | ESP32-S3 Wi-Fi |
@@ -55,6 +55,7 @@ SD write path, then add PLUS-button hold-to-record and LCD status.
 
 ## Sources
 
+- Waveshare product SKU: https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33867
 - Waveshare docs: https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54
 - Waveshare example BSP: https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.54
 - Schematic: `ESP32-S3-LCD-1.54-Schematic.pdf` from Waveshare resources
