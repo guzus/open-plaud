@@ -32,6 +32,20 @@ class TranscribeOptions:
 @dataclass(slots=True)
 class Transcript:
     text: str
+    language: str | None = None
+
+
+@dataclass(slots=True)
+class ActionItem:
+    text: str
+    owner: str | None = None
+    due: str | None = None
+
+
+@dataclass(slots=True)
+class Summary:
+    summary: str
+    action_items: list[ActionItem] = field(default_factory=list)
 
 
 @dataclass(slots=True)
