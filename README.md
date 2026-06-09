@@ -41,6 +41,12 @@ Current v0 hardware target: **Waveshare ESP32-S3-LCD-1.54 + battery**. It keeps
 the important recorder pieces under $30: dual mic + ES7210 ADC, battery
 charging, TF/microSD, Wi-Fi, and a small status LCD.
 
+![Plaud Note vs Waveshare ESP32-S3-LCD-1.54 size comparison](docs/assets/plaud-vs-waveshare-lcd154.png)
+
+Plaud is much thinner and more finished; the Waveshare board is cheaper,
+open-firmware friendly, and already includes the pieces needed for a working v0
+recorder prototype.
+
 ## Quick start (server)
 
 This project is **uv-managed**. Install [uv](https://docs.astral.sh/uv/), then:
