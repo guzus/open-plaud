@@ -29,4 +29,12 @@ menu "open-plaud"
         default 30000
         range 5000 300000
 
+    config OPEN_PLAUD_MAX_REC_SECONDS
+        int "Max clip length in seconds"
+        default 1800
+        range 10 7200
+        help
+            Hold-to-record auto-stops after this many seconds, so a stuck or
+            forgotten PLUS button cannot fill the card with one endless WAV.
+
 endmenu
