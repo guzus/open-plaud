@@ -35,8 +35,10 @@ Current v0 target:
 - Board: Waveshare ESP32-S3-LCD-1.54 with battery
 - Device role: record WAV locally, upload over Wi-Fi
 - Server role: ingest audio, transcribe, diarize, summarize
-- Repo status: firmware scaffold, FastAPI ingest scaffold, BOM, hardware decision
-  docs, and first reference case files exist; hardware bring-up is still pending
+- Repo status: the server loop works end to end (upload → transcribe →
+  summarize → persist → web UI) with cloud providers behind pluggable
+  interfaces; firmware is a complete scaffold awaiting hardware bring-up;
+  BOM, hardware decision docs, and reference case files exist
 
 Approximate v0 BOM:
 

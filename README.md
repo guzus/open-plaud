@@ -23,8 +23,7 @@ open-plaud/
 ├── firmware/      ESP32-S3 firmware (ESP-IDF) — record, sync over Wi-Fi
 ├── hardware/      BOM, 3D-print case files, wiring diagrams
 ├── server/        Python pipeline: ingest → transcribe → diarize → summarize
-├── docs/          Build guide, architecture, API reference
-└── scripts/       Dev/setup helpers
+└── docs/          Architecture, roadmap, hardware decision, prior art, research
 ```
 
 ## Status
