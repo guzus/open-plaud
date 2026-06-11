@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -64,7 +65,7 @@ def _fake_cli(
     args_file = tmp_path / "args.txt"
     lines = [
         "#!/bin/sh",
-        f"printf '%s\\n' \"$@\" > '{args_file}'",
+        f"printf '%s\\n' \"$@\" > {shlex.quote(str(args_file))}",
         'out=""',
         'prev=""',
         'for a in "$@"; do',
@@ -73,11 +74,11 @@ def _fake_cli(
         "done",
     ]
     if stderr_line is not None:
-        lines.append(f"echo '{stderr_line}' >&2")
+        lines.append(f"printf '%s\\n' {shlex.quote(stderr_line)} >&2")
     if payload is not None:
         payload_file = tmp_path / "payload.json"
         payload_file.write_text(payload)
-        lines.append(f"cp '{payload_file}' \"$out.json\"")
+        lines.append(f"cp {shlex.quote(str(payload_file))} \"$out.json\"")
     lines.append(f"exit {exit_code}")
     script = tmp_path / "fake-whisper-cli"
     script.write_text("\n".join(lines) + "\n")
