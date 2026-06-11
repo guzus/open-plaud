@@ -37,6 +37,9 @@ providers are `none` (no key required) so the server runs offline out of the box
 On-device (desktop/mobile) inference can be added later as additional providers
 without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
 
+Related-project research and positioning notes live in `docs/PRIOR_ART.md` and
+`docs/POSITIONING.md`.
+
 Current v0 hardware target: **Waveshare ESP32-S3-LCD-1.54 + battery**. It keeps
 the important recorder pieces under $30: dual mic + ES7210 ADC, battery
 charging, TF/microSD, Wi-Fi, and a small status LCD.
