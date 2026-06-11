@@ -111,7 +111,11 @@ esp_err_t audio_init(void)
 
 esp_err_t audio_read(void *buf, size_t bytes, size_t *out_read)
 {
-    return i2s_channel_read(s_rx, buf, bytes, out_read, portMAX_DELAY);
+    /* Finite timeout, not portMAX_DELAY: a wedged DMA (codec crash, clock
+     * loss) must surface as ESP_ERR_TIMEOUT so the caller's bad-read bound
+     * can abort the clip. 500 ms >> one 4 KiB buffer fill (~64 ms). A timeout
+     * can still return partial data in *out_read — callers should use it. */
+    return i2s_channel_read(s_rx, buf, bytes, out_read, pdMS_TO_TICKS(500));
 }
 
 void audio_deinit(void)

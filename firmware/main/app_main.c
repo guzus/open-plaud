@@ -29,7 +29,8 @@ static const char *TAG = "open-plaud";
 
 #define BTN_POLL_MS        20   /* idle poll cadence                                */
 #define BTN_DEBOUNCE_POLLS 2    /* consecutive agreeing polls to accept press/release */
-#define MAX_BAD_READS      200  /* consecutive failed/empty audio reads before abort */
+#define MAX_BAD_READS      20   /* consecutive empty reads before abort; audio_read
+                                 * times out at 500 ms, so worst case ~10 s wedged */
 
 /* Block until the button has read `pressed` for BTN_DEBOUNCE_POLLS consecutive
  * 20 ms polls. This is the only debouncing in the system — button.c reports
@@ -64,7 +65,9 @@ static esp_err_t record_clip(const char *path)
     while (written < max_bytes) {
         size_t want = sizeof buf;
         if (want > max_bytes - written) want = max_bytes - written;  /* exact cap */
-        if (audio_read(buf, want, &got) != ESP_OK || got == 0) {
+        (void)audio_read(buf, want, &got);  /* a timed-out read may still carry
+                                             * partial data in got — use it     */
+        if (got == 0) {
             if (++bad_reads > MAX_BAD_READS) {      /* I2S is wedged — fail loudly */
                 ESP_LOGE(TAG, "audio stalled (%d empty reads) — stopping clip", bad_reads);
                 break;
@@ -77,8 +80,9 @@ static esp_err_t record_clip(const char *path)
             break;
         }
         written += got;
-        /* Poll the button once per chunk (~64 ms); two consecutive released
-         * samples stop the clip — same 2-agree rule as the idle debounce. */
+        /* Poll the button once per chunk read (~64 ms when audio is healthy —
+         * a slower cadence than the idle 20 ms debounce); two consecutive
+         * released samples stop the clip. */
         released = button_pressed() ? 0 : released + 1;
         if (released >= BTN_DEBOUNCE_POLLS) break;
     }
@@ -87,17 +91,21 @@ static esp_err_t record_clip(const char *path)
                  CONFIG_OPEN_PLAUD_MAX_REC_SECONDS);
     }
 
-    /* wav_close patches the RIFF/data sizes in the header. If that fails, the
-     * file still carries the open-time placeholder (data_bytes = 0) and is
-     * corrupt — do not upload it this boot. It stays in the card root for
-     * inspection, so note: the next boot's retry pass will still attempt it. */
-    if (wav_close(&wav) != ESP_OK) {
-        ESP_LOGE(TAG, "wav close failed — not uploading corrupt clip; %s left on SD", path);
-        return ESP_FAIL;
-    }
+    /* wav_close patches the RIFF/data sizes in the header (and always closes
+     * the FILE*, even on failure). Empty clips are removed regardless of the
+     * close result — a 44-byte close-failed corpse would otherwise sit in the
+     * card root and get uploaded by the next boot's retry pass. */
+    bool close_ok = (wav_close(&wav) == ESP_OK);
     if (written == 0) {                 /* nothing captured — don't queue junk */
         remove(path);
         ESP_LOGW(TAG, "no audio captured — removed %s", path);
+        return ESP_FAIL;
+    }
+    if (!close_ok) {
+        /* Corrupt header (data_bytes = 0): do not upload this boot. It stays
+         * in the card root for inspection — the next boot's retry pass will
+         * still attempt it, see README caveat. */
+        ESP_LOGE(TAG, "wav close failed — not uploading corrupt clip; %s left on SD", path);
         return ESP_FAIL;
     }
     ESP_LOGI(TAG, "wrote %u bytes to %s", (unsigned)written, path);
