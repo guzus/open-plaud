@@ -17,10 +17,10 @@
 - [~] 3D-printable case for LCD-1.54 + battery (first-article STL exists; measure after board arrives)
 
 ## v2 — local transcription (the deferred decision)
-The interface is already built for this. These are new providers, not rewrites.
-- [ ] `whisper_cpp` desktop provider (registered stub exists today)
+The interface was already built for this. These are new providers, not rewrites.
+- [x] `whisper_cpp` desktop provider — subprocess wrapper around `whisper-cli`; no cloud key
+- [x] `OP_PIPELINE__TRANSCRIPTION=whisper_cpp` switch documented (`server/.env.example`, README)
 - [ ] On-device mobile transcription (Core ML / TFLite)
-- [ ] `OP_TRANSCRIPTION=whisper_cpp` switch documented
 
 ## v3 — speaker intelligence
 - [ ] `pyannote` / `whisperx` diarization providers

@@ -14,7 +14,7 @@ Commercial AI recorders ship cheap hardware and monetize a cloud subscription th
 | | Plaud (commercial) | open-plaud |
 |---|---|---|
 | Hardware | Closed, ~$159+ | Open, ~₩40–70k DIY |
-| Transcription | Cloud-only, minute-capped | Pluggable: cloud now, local later |
+| Transcription | Cloud-only, minute-capped | Pluggable: cloud (OpenAI) or local (whisper.cpp) |
 | Summarization | Their templates | Any LLM (Claude / GPT / local) |
 | Recordings | Their cloud | Your storage |
 | Cost model | Subscription | Pay-per-use or free (local) |
@@ -31,13 +31,15 @@ open-plaud/
 
 ## Status
 
-The server loop works end to end: upload → transcribe → summarize → browse. Cloud
-transcription (OpenAI Whisper) and summarization (Claude) providers are implemented
-behind the pipeline's protocols and selected by config; recordings persist in SQLite
-and survive restarts; a small web UI lists, plays, and exports them. The default
-providers are `none` (no key required) so the server runs offline out of the box.
-On-device (desktop/mobile) inference can be added later as additional providers
-without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
+The server loop works end to end: upload → transcribe → summarize → browse.
+Transcription runs in the cloud (OpenAI Whisper) **or fully local via
+whisper.cpp — no API key**; summarization uses Claude. All providers sit behind
+the pipeline's protocols and are selected by config; recordings persist in
+SQLite and survive restarts; a small web UI lists, plays, and exports them. The
+default providers are `none` (no key required) so the server runs offline out
+of the box. On-device mobile inference can be added later as another provider
+without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and
+`docs/ROADMAP.md`.
 
 Related-project research and positioning notes live in `docs/PRIOR_ART.md` and
 `docs/POSITIONING.md`.
@@ -80,6 +82,15 @@ select the cloud providers:
 OP_PIPELINE__TRANSCRIPTION=openai_whisper   # needs OPENAI_API_KEY
 OP_PIPELINE__SUMMARIZATION=claude           # needs ANTHROPIC_API_KEY
 ```
+
+Or transcribe fully locally — no transcription key, audio never leaves your
+machine (`brew install whisper-cpp`, download a ggml model):
+
+```bash
+OP_PIPELINE__TRANSCRIPTION=whisper_cpp      # needs whisper-cli + OP_WHISPER_CPP_MODEL
+```
+
+See `server/.env.example` for the `whisper_cpp` binary/model settings.
 
 `uv` reads the pinned interpreter from `.python-version` (installing it if missing).
 Dev tools (pytest, ruff, mypy) come with `uv sync` — run them via `uv run pytest`,
