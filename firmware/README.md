@@ -99,7 +99,8 @@ write and refuses to upload if the WAV header can't be patched on close.
 
 - [ ] Flash on hardware and tune the first real Wi-Fi/audio bring-up issues.
 - [ ] Hold-to-record button via direct GPIO (`BSP_PLUS_BUTTON_GPIO`, GPIO4) or PWR/BOOT UX.
-- [ ] Retry queue, rotate filenames / tag recordings; LCD status UI via ST7789.
+- [ ] Retry queue, rotate filenames / tag recordings; LCD status UI via ST7789
+      (staged bring-up states: boot → SD → audio → recording → done/error).
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 
 ## Sources

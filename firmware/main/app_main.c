@@ -30,11 +30,17 @@ void app_main(void)
     }
 
     if (sdcard_mount() != ESP_OK) { ESP_LOGE(TAG, "no SD card — halting"); return; }
-    if (audio_init()  != ESP_OK)  { ESP_LOGE(TAG, "audio init failed — halting"); return; }
+    if (audio_init() != ESP_OK) {
+        ESP_LOGE(TAG, "audio init failed — halting");
+        sdcard_unmount();
+        return;
+    }
 
     wav_writer_t wav;
     if (wav_open(&wav, REC_PATH, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITS) != ESP_OK) {
         ESP_LOGE(TAG, "cannot open %s", REC_PATH);
+        audio_deinit();
+        sdcard_unmount();
         return;
     }
 
