@@ -1,8 +1,11 @@
 # open-plaud
 
-An open-source, self-hostable alternative to AI voice recorders like Plaud — DIY hardware, a pluggable transcription pipeline, and AI summarization you control.
+An open reference stack for a Plaud-like recorder: DIY ESP32-S3 hardware, firmware that records and syncs WAV files, and a self-hosted transcription/summarization server you control.
 
 No per-minute limits. No forced cloud lock-in. No subscription. You own the recordings and the pipeline.
+
+> This project is independent and is not affiliated with, endorsed by, or
+> sponsored by Plaud. See `docs/PRIOR_ART.md` for naming and positioning notes.
 
 ## Why
 
