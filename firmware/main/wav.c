@@ -46,7 +46,12 @@ esp_err_t wav_open(wav_writer_t *w, const char *path,
     w->sample_rate = sample_rate;
     w->channels    = channels;
     w->bits        = bits;
-    return write_header(w);
+    esp_err_t err = write_header(w);
+    if (err != ESP_OK) {        /* don't leak the handle into the caller's loop */
+        fclose(w->f);
+        w->f = NULL;
+    }
+    return err;
 }
 
 esp_err_t wav_write(wav_writer_t *w, const void *pcm, size_t bytes)

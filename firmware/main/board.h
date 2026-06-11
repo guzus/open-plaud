@@ -44,6 +44,13 @@
 #define BSP_BOOT_BUTTON_GPIO  0
 #define BSP_PLUS_BUTTON_GPIO  4
 #define BSP_PWR_BUTTON_GPIO   5
+/* UNVERIFIED ASSUMPTION — confirm on first hardware bring-up. The PLUS button
+ * is assumed wired button-to-GND, idling high via the ESP32-S3 internal
+ * pull-up, so pressed == level 0. The schematic has not been cross-checked for
+ * this net. If a recording starts by itself at boot, or a held button never
+ * starts one, flip this to 1 — see "Validate on first hardware bring-up" in
+ * firmware/README.md. */
+#define BSP_BTN_ACTIVE_LEVEL  0
 #define BSP_PA_CTRL_GPIO      7    /* speaker amp enable (playback)           */
 #define BSP_BAT_ADC_GPIO      1
 #define BSP_BAT_EN_GPIO       2

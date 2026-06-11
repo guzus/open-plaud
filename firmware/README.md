@@ -1,8 +1,10 @@
 # Firmware — ESP-IDF (Waveshare ESP32-S3-LCD-1.54)
 
-The recorder firmware. ESP-IDF (C), no Arduino. Current milestone: **boot → mount
-microSD → init the ES7210 dual-mic ADC → record a fixed WAV clip to the card.**
-It then joins Wi-Fi and uploads that WAV to the server as multipart/form-data.
+The recorder firmware. ESP-IDF (C), no Arduino. Current milestone: **boot →
+retry any uploads a previous run left pending → hold the PLUS button to record
+a numbered WAV (`rec_NNNN.wav`) to microSD → upload on release** as
+multipart/form-data. Uploaded clips move to `/sdcard/sent/`; failed uploads
+stay in the card root and are retried on the next boot.
 
 > **Status: scaffold, not yet flashed on hardware.** Pins are schematic-confirmed,
 > but `audio.c` mirrors Espressif's `i2s_es7210_tdm` example from source — verify the
@@ -39,9 +41,15 @@ idf.py -p /dev/cu.usbmodem* flash monitor    # Ctrl-] to exit the monitor
 doesn't appear, hold **BOOT**, tap **RESET**, release BOOT to force download mode.
 
 Insert a FAT32 microSD. On boot you should see the SD info, `audio ready: 16000 Hz…`,
-then `wrote N bytes to /sdcard/rec_0001.wav`, followed by a multipart upload to
-`POST {server}/v1/recordings`. If Wi-Fi or HTTP fails, the WAV remains on the SD
-card for manual recovery or a future retry queue.
+a retry pass over clips left pending by earlier runs (oldest first, up to 64 per
+boot), then `ready — hold PLUS (GPIO4) to record`. Hold **PLUS** to record
+`rec_0001.wav`, `rec_0002.wav`, … (numbers are never reused — the root *and*
+`/sdcard/sent/` are scanned); release to stop and upload to
+`POST {server}/v1/recordings`. On success the clip moves to `/sdcard/sent/`. On
+the first upload failure the firmware stops trying for the rest of this boot
+(Wi-Fi is likely down) and keeps recording to SD; the next boot's retry pass
+clears the backlog. A held button auto-stops after
+`OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s) and a new press starts a new clip.
 
 ## Layout
 
@@ -49,10 +57,12 @@ card for manual recovery or a future retry queue.
 |---|---|
 | `main/board.h` | **pin map** (Waveshare LCD-1.54 BSP + schematic) — I2S/I2C/SD/LCD/buttons |
 | `main/audio.c` | ES7210 dual-mic capture (I2C via `esp_codec_dev`, I2S-TDM RX) |
+| `main/button.c` | PLUS button (GPIO4) — polled input + pull-up, raw level only; `app_main` debounces |
 | `main/sdcard.c` | mount microSD (FATFS, **1-bit** SDMMC: CLK=16, CMD=15, D0=17) |
 | `main/wav.c` | streaming 16-bit PCM WAV writer |
+| `main/rec_store.c` | clip numbering (`rec_NNNN.wav`, never reused), `/sdcard/sent/` move, boot-time retry queue |
 | `main/net_upload.c` | Wi-Fi STA + multipart upload to the server |
-| `main/app_main.c` | orchestration: mount → record → (upload) |
+| `main/app_main.c` | orchestration: mount → retry pending → hold-to-record loop → upload |
 | `sdkconfig.defaults` | 16 MB flash, octal PSRAM, USB-JTAG console, custom partitions |
 
 ## Device → server contract (target)
@@ -75,6 +85,7 @@ Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 - `OPEN_PLAUD_SERVER_URL` (base URL, for example `http://192.168.1.50:8000`)
 - `OPEN_PLAUD_WIFI_MAX_RETRIES`
 - `OPEN_PLAUD_UPLOAD_TIMEOUT_MS`
+- `OPEN_PLAUD_MAX_REC_SECONDS` (auto-stop for a held button, default 1800)
 
 ## Validate on first hardware bring-up
 
@@ -87,20 +98,36 @@ items to confirm with a board in hand:
   installed `esp_codec_dev` version these can double-configure/enable the RX path —
   watch for an error at `i2s_channel_enable`/`esp_codec_dev_open` and drop one side
   if so.
-- **`audio_read` failure path** busy-loops with no backoff (`app_main.c`); add a
-  retry bound once you see real I2S behavior.
+- **PLUS button polarity (`BSP_BTN_ACTIVE_LEVEL` in `board.h`).** UNVERIFIED
+  assumption: button shorts GPIO4 to GND and idles high on the internal pull-up,
+  so pressed == 0. If a recording starts by itself at boot, or a held button
+  never starts one, flip it to 1.
+- **FATFS rename-into-subdir.** `rec_store_mark_sent()` relies on
+  `rename("/sdcard/rec_NNNN.wav" → "/sdcard/sent/…")` across directories on the
+  same volume (FatFs `f_rename` supports this). Confirm clips actually land in
+  `/sdcard/sent/` after a successful upload.
+- **Debounce timing.** Start/stop needs 2 consecutive agreeing polls: 20 ms
+  apart when idle, one poll per ~64 ms audio chunk while recording. Verify
+  against the real button's bounce; tune `BTN_POLL_MS`/`BTN_DEBOUNCE_POLLS`.
+- **`audio_read` failure bound.** A clip now aborts after 200 consecutive
+  failed/empty reads (replaces the old unbounded busy-loop) — the threshold is
+  untested; tune once you see real I2S failure behavior.
 - **Transcription cost:** capture is 2-channel; consider down-mixing the two mics to
   mono before upload (halves file size and Whisper cost) unless diarization needs both.
 
-A corrupt-clip guard is already in place: `app_main.c` now aborts on a failed SD
-write and refuses to upload if the WAV header can't be patched on close.
+A corrupt-clip guard is already in place: `app_main.c` aborts on a failed SD
+write and refuses to upload if the WAV header can't be patched on close. Caveat:
+a close-failed clip stays in the card root, and the next boot's retry pass
+cannot tell it from a healthy pending clip, so it will be attempted then —
+inspect/remove such clips before rebooting if that matters.
 
 ## TODO (ROADMAP v1)
 
 - [ ] Flash on hardware and tune the first real Wi-Fi/audio bring-up issues.
-- [ ] Hold-to-record button via direct GPIO (`BSP_PLUS_BUTTON_GPIO`, GPIO4) or PWR/BOOT UX.
-- [ ] Retry queue, rotate filenames / tag recordings; LCD status UI via ST7789
-      (staged bring-up states: boot → SD → audio → recording → done/error).
+- [x] Hold-to-record button via direct GPIO (`BSP_PLUS_BUTTON_GPIO`, GPIO4).
+- [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
+- [ ] LCD status UI via ST7789 (staged bring-up states: boot → SD → audio →
+      recording → done/error).
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 
 ## Sources
