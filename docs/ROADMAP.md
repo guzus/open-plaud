@@ -11,14 +11,18 @@
 
 ## v1 — hardware reference
 - [x] Select v0 hardware: Waveshare ESP32-S3-LCD-1.54 + battery (dual mic, ES7210, TF, LCD)
-- [~] ESP-IDF firmware scaffold for ESP32-S3-LCD-1.54 (dual-mic, ES7210 ADC) — `firmware/`
-- [~] Record WAV to microSD (bring-up path done); hold-to-record + tag still TODO
+- [~] ESP-IDF firmware for ESP32-S3-LCD-1.54 — builds clean on ESP-IDF v5.4.1
+      (`esp_codec_dev` 2.0.0); flash + runtime validation pending board arrival
+- [~] Recorder loop implemented: hold-to-record (PLUS), numbered `rec_NNNN.wav`
+      clips, `/sdcard/sent` + next-boot upload retry queue — hardware-unvalidated
 - [~] Wi-Fi sync to `POST /v1/recordings` (implemented, not hardware-flashed yet)
 - [~] 3D-printable case for LCD-1.54 + battery (first-article STL exists; measure after board arrives)
 
 ## v2 — local transcription (the deferred decision)
 The interface was already built for this. These are new providers, not rewrites.
-- [x] `whisper_cpp` desktop provider — subprocess wrapper around `whisper-cli`; no cloud key
+- [x] `whisper_cpp` desktop provider — subprocess wrapper around `whisper-cli`; no cloud
+      key. Smoke-tested against real whisper.cpp (brew 1.8.x) + `ggml-base.en`: mono and
+      device-shaped stereo 16 kHz WAVs, end-to-end through `POST /v1/recordings`
 - [x] `OP_PIPELINE__TRANSCRIPTION=whisper_cpp` switch documented (`server/.env.example`, README)
 - [ ] On-device mobile transcription (Core ML / TFLite)
 

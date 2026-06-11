@@ -6,10 +6,11 @@ a numbered WAV (`rec_NNNN.wav`) to microSD → upload on release** as
 multipart/form-data. Uploaded clips move to `/sdcard/sent/`; failed uploads
 stay in the card root and are retried on the next boot.
 
-> **Status: scaffold, not yet flashed on hardware.** Pins are schematic-confirmed,
-> but `audio.c` mirrors Espressif's `i2s_es7210_tdm` example from source — verify the
-> `esp_codec_dev` struct fields against your installed version before trusting a build.
-> This is a real starting point to iterate on with a board in hand, not a finished image.
+> **Status: builds clean, not yet flashed on hardware.** Compile-verified on
+> ESP-IDF v5.4.1 with `esp_codec_dev` 2.0.0 — settling the struct-field caveat
+> in the `i2s_es7210_tdm`-derived `audio.c` for that version. Pins are
+> schematic-confirmed. Runtime behavior (audio init, button polarity, SD, Wi-Fi)
+> remains unvalidated until a board is in hand.
 
 ## Prerequisites
 
@@ -109,11 +110,14 @@ items to confirm with a board in hand:
 - **Debounce timing.** Start/stop needs 2 consecutive agreeing polls: 20 ms
   apart when idle, one poll per ~64 ms audio chunk while recording. Verify
   against the real button's bounce; tune `BTN_POLL_MS`/`BTN_DEBOUNCE_POLLS`.
-- **`audio_read` failure bound.** A clip now aborts after 200 consecutive
-  failed/empty reads (replaces the old unbounded busy-loop) — the threshold is
-  untested; tune once you see real I2S failure behavior.
-- **Transcription cost:** capture is 2-channel; consider down-mixing the two mics to
-  mono before upload (halves file size and Whisper cost) unless diarization needs both.
+- **`audio_read` stall bound.** Reads time out at 500 ms (not `portMAX_DELAY` —
+  a wedged DMA must surface, or the task blocks forever, invisible to the task
+  watchdog); a clip aborts after 20 consecutive empty reads (~10 s worst case).
+  Both numbers are untested — tune once you see real I2S failure behavior.
+- **Transcription cost:** capture is 2-channel; consider down-mixing the two mics
+  to mono before upload (halves file size and cloud-Whisper cost) unless
+  diarization needs both. Not a correctness issue: server-side `whisper_cpp` was
+  verified to transcribe device-shaped stereo 16 kHz WAVs as-is.
 
 A corrupt-clip guard is already in place: `app_main.c` aborts on a failed SD
 write and refuses to upload if the WAV header can't be patched on close. Caveat:
@@ -126,6 +130,8 @@ inspect/remove such clips before rebooting if that matters.
 - [ ] Flash on hardware and tune the first real Wi-Fi/audio bring-up issues.
 - [x] Hold-to-record button via direct GPIO (`BSP_PLUS_BUTTON_GPIO`, GPIO4).
 - [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
+- [ ] Make `wifi_connect` re-enterable (clean up netif/handlers on a failed join)
+      so uploads can retry within a boot instead of latching off until reboot.
 - [ ] LCD status UI via ST7789 (staged bring-up states: boot → SD → audio →
       recording → done/error).
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
