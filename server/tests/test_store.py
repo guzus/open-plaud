@@ -12,6 +12,7 @@ from open_plaud.types import (
     Recording,
     Summary,
     Transcript,
+    TranscriptSegment,
 )
 
 
@@ -32,7 +33,18 @@ def _full_recording(rec_id: str = "rec-1") -> Recording:
         ),
         status=JobStatus.DONE,
         created_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
-        transcript=Transcript(text="hello world", language="en"),
+        transcript=Transcript(
+            text="hello world",
+            language="en",
+            segments=[
+                TranscriptSegment(
+                    text="hello world",
+                    start=0.0,
+                    end=1.5,
+                    speaker="SPEAKER_00",
+                )
+            ],
+        ),
         # JSON-native values only: a tuple would round-trip as a list and break ==.
         diarization={"segments": [{"speaker": "A", "start": 0.0, "end": 1.5}]},
         summary=Summary(
@@ -62,7 +74,18 @@ def test_add_get_round_trip(tmp_path: Path) -> None:
     assert loaded.status is JobStatus.DONE
     assert loaded.audio.path == Path("/data/audio/rec-1.wav")
     assert loaded.audio.content_type == "audio/wav"
-    assert loaded.transcript == Transcript(text="hello world", language="en")
+    assert loaded.transcript == Transcript(
+        text="hello world",
+        language="en",
+        segments=[
+            TranscriptSegment(
+                text="hello world",
+                start=0.0,
+                end=1.5,
+                speaker="SPEAKER_00",
+            )
+        ],
+    )
     assert loaded.diarization == {
         "segments": [{"speaker": "A", "start": 0.0, "end": 1.5}]
     }

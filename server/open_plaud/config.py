@@ -20,4 +20,5 @@ class Config(BaseSettings):
     )
 
     storage_dir: Path = Field(default=Path("storage"))
+    upload_max_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)

@@ -1,4 +1,52 @@
 #pragma once
+#include "sdkconfig.h"
+#if CONFIG_OPEN_PLAUD_BOARD_CUSTOM_REV_A
+
+/*
+ * Custom PCB Rev A proposed pin map.
+ *
+ * Confidence: docs/CUSTOM_PCB_REV_A.md architecture contract. This validates
+ * ESP-IDF API compatibility for the proposed pins; it is not an ERC/DRC result.
+ */
+#define BSP_BOARD_NAME          "custom-rev-a"
+#define BSP_AUDIO_BACKEND_PDM   1
+#define BSP_AUDIO_BACKEND_ES7210 0
+#define BSP_HAS_LCD             0
+#define BSP_HAS_RGB_LED         1
+
+/* ---- I2S0 PDM microphones --------------------------------------------- */
+#define BSP_PDM_CLK_GPIO       8
+#define BSP_PDM_DATA0_GPIO     9
+#define BSP_PDM_DATA1_GPIO    10    /* optional future pair, not used by v1 capture */
+#define BSP_MIC_EN_GPIO       11
+
+/* ---- microSD / TF card (SDMMC; 1-bit default, 4-bit after validation) --- */
+#define BSP_SD_CLK_GPIO       14
+#define BSP_SD_CMD_GPIO       15
+#define BSP_SD_D0_GPIO        16
+#define BSP_SD_D1_GPIO        17
+#define BSP_SD_D2_GPIO        18
+#define BSP_SD_D3_GPIO        21
+#define BSP_SD_DET_GPIO        7
+#define BSP_SD_WIDTH           CONFIG_OPEN_PLAUD_SDMMC_WIDTH
+
+/* ---- Fuel gauge / power status ----------------------------------------- */
+#define BSP_I2C_SDA_GPIO      42
+#define BSP_I2C_SCL_GPIO      41
+#define BSP_CHG_STAT_GPIO      5
+#define BSP_PGOOD_GPIO         6
+
+/* ---- Buttons and RGB status LED ---------------------------------------- */
+#define BSP_BOOT_BUTTON_GPIO   0
+#define BSP_PLUS_BUTTON_GPIO   4
+#define BSP_BTN_ACTIVE_LEVEL   0
+#define BSP_RGB_LED_R_GPIO    35
+#define BSP_RGB_LED_G_GPIO    36
+#define BSP_RGB_LED_B_GPIO    37
+#define BSP_RGB_LED_ACTIVE_LEVEL 1
+
+#else
+
 /*
  * Waveshare ESP32-S3-LCD-1.54 pin map.
  *
@@ -7,6 +55,11 @@
  * The non-touch and touch variants share the same core board features; touch
  * adds CST816 on the same I2C bus.
  */
+#define BSP_BOARD_NAME          "waveshare-lcd154"
+#define BSP_AUDIO_BACKEND_PDM   0
+#define BSP_AUDIO_BACKEND_ES7210 1
+#define BSP_HAS_LCD             1
+#define BSP_HAS_RGB_LED         0
 
 /* ---- I2S0 (single shared full-duplex bus; the recorder uses RX only) ---- */
 #define BSP_I2S_MCLK_GPIO     8
@@ -30,9 +83,11 @@
 #define BSP_SD_D1_GPIO       18
 #define BSP_SD_D2_GPIO       13
 #define BSP_SD_D3_GPIO       14
-#define BSP_SD_WIDTH          1
+#define BSP_SD_WIDTH          CONFIG_OPEN_PLAUD_SDMMC_WIDTH
 
 /* ---- LCD (ST7789, SPI; unused by the recorder bring-up path today) ------ */
+#define BSP_LCD_H_RES       240
+#define BSP_LCD_V_RES       240
 #define BSP_LCD_MOSI_GPIO    39
 #define BSP_LCD_SCLK_GPIO    38
 #define BSP_LCD_CS_GPIO      21
@@ -55,3 +110,5 @@
 #define BSP_BAT_ADC_GPIO      1
 #define BSP_BAT_EN_GPIO       2
 #define BSP_CHG_STAT_GPIO     3
+
+#endif

@@ -27,7 +27,7 @@ from fastapi.responses import (
     RedirectResponse,
 )
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from open_plaud.config import Config
 from open_plaud.pipeline.orchestrator import Pipeline
@@ -44,9 +44,17 @@ _SUFFIX_MEDIA_TYPES = {
 }
 
 
+class TranscriptSegmentResponse(BaseModel):
+    text: str
+    start: float | None = None
+    end: float | None = None
+    speaker: str | None = None
+
+
 class TranscriptResponse(BaseModel):
     text: str
     language: str | None = None
+    segments: list[TranscriptSegmentResponse] = Field(default_factory=list)
 
 
 class ActionItemResponse(BaseModel):
@@ -73,6 +81,10 @@ class RecordingResponse(BaseModel):
     error: str | None = None
 
 
+class HealthResponse(BaseModel):
+    status: str
+
+
 app = FastAPI(title="open-plaud API", version="0.0.1")
 config = Config()
 store = RecordingStore(config)
@@ -91,6 +103,11 @@ def _safe_suffix(filename: str | None) -> str:
     return suffix if suffix in _AUDIO_SUFFIXES else ".wav"
 
 
+def _is_supported_audio_upload(filename: str | None, content_type: str | None) -> bool:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix in _AUDIO_SUFFIXES or content_type in _AUDIO_MEDIA_TYPES
+
+
 def _audio_media_type(rec: Recording) -> str:
     # Never reflect the client-supplied content_type unchecked — that would let an
     # upload serve e.g. text/html from our origin. Allowlist it, else derive from
@@ -102,7 +119,19 @@ def _audio_media_type(rec: Recording) -> str:
 
 def _to_response(rec: Recording) -> RecordingResponse:
     transcript = (
-        TranscriptResponse(text=rec.transcript.text, language=rec.transcript.language)
+        TranscriptResponse(
+            text=rec.transcript.text,
+            language=rec.transcript.language,
+            segments=[
+                TranscriptSegmentResponse(
+                    text=segment.text,
+                    start=segment.start,
+                    end=segment.end,
+                    speaker=segment.speaker,
+                )
+                for segment in rec.transcript.segments
+            ],
+        )
         if rec.transcript is not None
         else None
     )
@@ -125,6 +154,11 @@ def _to_response(rec: Recording) -> RecordingResponse:
         summary=summary,
         error=rec.error,
     )
+
+
+@app.get("/healthz", response_model=HealthResponse)
+async def healthz() -> HealthResponse:
+    return HealthResponse(status="ok")
 
 
 async def _process(recording_id: str) -> None:
@@ -151,12 +185,21 @@ async def create_recording(
 ) -> RecordingResponse:
     recording_id = uuid4().hex
     filename = file.filename or f"{recording_id}.wav"
+    if not _is_supported_audio_upload(filename, file.content_type):
+        raise HTTPException(status_code=415, detail="unsupported audio upload")
+
     destination = _storage_dir() / f"{recording_id}{_safe_suffix(filename)}"
 
     size = 0
     with destination.open("wb") as out:
         while chunk := await file.read(1024 * 1024):
             size += len(chunk)
+            if size > config.upload_max_bytes:
+                destination.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"uploaded file exceeds {config.upload_max_bytes} bytes",
+                )
             out.write(chunk)
 
     if size == 0:
@@ -240,7 +283,16 @@ def _render_markdown(rec: Recording) -> str:
                 )
                 lines.append(f"- [ ] {item.text}" + (f" ({meta})" if meta else ""))
     if rec.transcript is not None and rec.transcript.text:
-        lines += ["", "## Transcript", "", rec.transcript.text]
+        lines += ["", "## Transcript", ""]
+        if rec.transcript.segments:
+            for segment in rec.transcript.segments:
+                speaker = f"{segment.speaker}: " if segment.speaker else ""
+                timestamp = ""
+                if segment.start is not None:
+                    timestamp = f"[{segment.start:.1f}s] "
+                lines.append(f"{timestamp}{speaker}{segment.text}")
+        else:
+            lines.append(rec.transcript.text)
     if rec.error:
         lines += ["", "## Error", "", rec.error]
     return "\n".join(lines) + "\n"

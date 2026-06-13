@@ -17,7 +17,11 @@ esp_err_t sdcard_mount(void)
     };
 
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.flags = SDMMC_HOST_FLAG_1BIT;          /* only CLK/CMD/D0 are GPIO-wired */
+    if (BSP_SD_WIDTH == 1) {
+        host.flags = SDMMC_HOST_FLAG_1BIT;
+    } else {
+        host.flags = SDMMC_HOST_FLAG_4BIT;
+    }
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
 
     /* ESP32-S3 routes SDMMC through the GPIO matrix, so the pins are explicit. */
@@ -26,6 +30,11 @@ esp_err_t sdcard_mount(void)
     slot.clk   = BSP_SD_CLK_GPIO;
     slot.cmd   = BSP_SD_CMD_GPIO;
     slot.d0    = BSP_SD_D0_GPIO;
+    if (BSP_SD_WIDTH == 4) {
+        slot.d1 = BSP_SD_D1_GPIO;
+        slot.d2 = BSP_SD_D2_GPIO;
+        slot.d3 = BSP_SD_D3_GPIO;
+    }
     slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 
     esp_err_t err = esp_vfs_fat_sdmmc_mount(SDCARD_MOUNT_POINT, &host, &slot,

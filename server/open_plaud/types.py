@@ -30,9 +30,18 @@ class TranscribeOptions:
 
 
 @dataclass(slots=True)
+class TranscriptSegment:
+    text: str
+    start: float | None = None
+    end: float | None = None
+    speaker: str | None = None
+
+
+@dataclass(slots=True)
 class Transcript:
     text: str
     language: str | None = None
+    segments: list[TranscriptSegment] = field(default_factory=list)
 
 
 @dataclass(slots=True)

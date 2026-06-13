@@ -7,7 +7,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from open_plaud.api.app import app, config, store
-from open_plaud.types import ActionItem, AudioRef, Summary, TranscribeOptions, Transcript
+from open_plaud.types import (
+    ActionItem,
+    AudioRef,
+    Summary,
+    TranscribeOptions,
+    Transcript,
+    TranscriptSegment,
+)
 
 
 class _StubTranscriber:
@@ -16,7 +23,11 @@ class _StubTranscriber:
     name = "stub"
 
     async def transcribe(self, audio: AudioRef, opts: TranscribeOptions) -> Transcript:
-        return Transcript(text="hello world", language="en")
+        return Transcript(
+            text="hello world",
+            language="en",
+            segments=[TranscriptSegment(text="hello world", start=0.0, end=1.5)],
+        )
 
 
 class _StubSummarizer:
@@ -45,9 +56,14 @@ def _isolate(tmp_path: Path) -> Iterator[None]:
     # Point both the audio blobs and the SQLite DB at a fresh tmp dir per test.
     # store.reset() drops the cached connection so the next op reconnects under
     # the new storage_dir (mirrors the lazy-path contract in store.py).
+    original_storage_dir = config.storage_dir
+    original_upload_max_bytes = config.upload_max_bytes
     config.storage_dir = tmp_path
+    config.upload_max_bytes = 512 * 1024 * 1024
     store.reset()
     yield
+    config.storage_dir = original_storage_dir
+    config.upload_max_bytes = original_upload_max_bytes
     store.reset()
 
 
@@ -100,6 +116,33 @@ def test_create_recording_rejects_empty_upload(tmp_path: Path) -> None:
     assert not list((tmp_path / "audio").glob("*"))
 
 
+def test_create_recording_rejects_unsupported_upload(tmp_path: Path) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/recordings",
+        files={"file": ("notes.txt", b"not audio", "text/plain")},
+    )
+
+    assert response.status_code == 415
+    assert response.json() == {"detail": "unsupported audio upload"}
+    assert not (tmp_path / "audio").exists()
+
+
+def test_create_recording_rejects_oversized_upload(tmp_path: Path) -> None:
+    config.upload_max_bytes = 4
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/recordings",
+        files={"file": ("rec.wav", b"12345", "audio/wav")},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "uploaded file exceeds 4 bytes"}
+    assert not list((tmp_path / "audio").glob("*"))
+
+
 def test_get_recording_missing_id() -> None:
     client = TestClient(app)
 
@@ -107,6 +150,15 @@ def test_get_recording_missing_id() -> None:
 
     assert response.status_code == 404
     assert response.json() == {"detail": "recording not found"}
+
+
+def test_healthz_returns_ok() -> None:
+    client = TestClient(app)
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_recording_survives_new_store_instance(tmp_path: Path) -> None:
@@ -190,7 +242,13 @@ def test_full_pipeline_produces_transcript_and_summary(
 
     got = client.get(f"/v1/recordings/{rid}").json()
     assert got["status"] == "done"
-    assert got["transcript"] == {"text": "hello world", "language": "en"}
+    assert got["transcript"] == {
+        "text": "hello world",
+        "language": "en",
+        "segments": [
+            {"text": "hello world", "start": 0.0, "end": 1.5, "speaker": None}
+        ],
+    }
     assert got["summary"]["summary"] == "A concise summary."
     assert got["summary"]["action_items"][0] == {
         "text": "email Bob",

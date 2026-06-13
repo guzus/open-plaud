@@ -4,7 +4,7 @@ Mirrors `transcription/`: the orchestrator depends only on the
 `SummarizationProvider` Protocol; concrete backends register themselves under a
 name via the `@register` decorator and are resolved from config by `create`.
 
-Today: `none` (passthrough) and `claude` (Anthropic Messages API).
+Today: `none` (passthrough), `claude` (Anthropic Messages API), and `ollama`.
 Later: additional cloud or on-device summarizers — added as new registrations,
 no caller change.
 """

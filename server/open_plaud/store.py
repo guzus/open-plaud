@@ -33,6 +33,7 @@ from open_plaud.types import (
     Recording,
     Summary,
     Transcript,
+    TranscriptSegment,
 )
 
 _CREATE_TABLE = """
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     audio_size_bytes INTEGER,
     transcript_text TEXT,
     transcript_language TEXT,
+    transcript_segments_json TEXT,
     diarization_json TEXT,
     summary_json TEXT,
     error TEXT
@@ -56,15 +58,15 @@ _UPSERT = """
 INSERT OR REPLACE INTO recordings (
     id, status, created_at,
     audio_path, audio_filename, audio_content_type, audio_size_bytes,
-    transcript_text, transcript_language,
+    transcript_text, transcript_language, transcript_segments_json,
     diarization_json, summary_json, error
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 _COLUMNS = (
     "id, status, created_at, "
     "audio_path, audio_filename, audio_content_type, audio_size_bytes, "
-    "transcript_text, transcript_language, "
+    "transcript_text, transcript_language, transcript_segments_json, "
     "diarization_json, summary_json, error"
 )
 
@@ -100,6 +102,7 @@ class RecordingStore:
             # multi-worker deploy has another process mid-write.
             conn.execute("PRAGMA busy_timeout=5000")
             conn.execute(_CREATE_TABLE)
+            _migrate(conn)
             conn.commit()
             self._conn = conn
         return self._conn
@@ -168,11 +171,32 @@ def _as_int(value: object) -> int:
     return value
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(recordings)")}
+    if "transcript_segments_json" not in columns:
+        conn.execute("ALTER TABLE recordings ADD COLUMN transcript_segments_json TEXT")
+
+
 def _to_row(rec: Recording) -> tuple[object, ...]:
     """Flatten a Recording into a parameter tuple for the upsert."""
     transcript_text = rec.transcript.text if rec.transcript is not None else None
     transcript_language = (
         rec.transcript.language if rec.transcript is not None else None
+    )
+    transcript_segments_json = (
+        json.dumps(
+            [
+                {
+                    "text": segment.text,
+                    "start": segment.start,
+                    "end": segment.end,
+                    "speaker": segment.speaker,
+                }
+                for segment in rec.transcript.segments
+            ]
+        )
+        if rec.transcript is not None and rec.transcript.segments
+        else None
     )
 
     diarization_json = (
@@ -206,6 +230,7 @@ def _to_row(rec: Recording) -> tuple[object, ...]:
         rec.audio.size_bytes,
         transcript_text,
         transcript_language,
+        transcript_segments_json,
         diarization_json,
         summary_json,
         rec.error,
@@ -224,6 +249,7 @@ def _from_row(row: tuple[object, ...]) -> Recording:
         audio_size_bytes,
         transcript_text,
         transcript_language,
+        transcript_segments_json,
         diarization_json,
         summary_json,
         error,
@@ -231,11 +257,29 @@ def _from_row(row: tuple[object, ...]) -> Recording:
 
     transcript: Transcript | None = None
     if transcript_text is not None:
+        segments: list[TranscriptSegment] = []
+        if transcript_segments_json is not None:
+            raw_segments = json.loads(str(transcript_segments_json))
+            assert isinstance(raw_segments, list)
+            segments = [
+                TranscriptSegment(
+                    text=str(item["text"]),
+                    start=(
+                        float(item["start"]) if item.get("start") is not None else None
+                    ),
+                    end=float(item["end"]) if item.get("end") is not None else None,
+                    speaker=(
+                        str(item["speaker"]) if item.get("speaker") is not None else None
+                    ),
+                )
+                for item in raw_segments
+            ]
         transcript = Transcript(
             text=str(transcript_text),
             language=(
                 str(transcript_language) if transcript_language is not None else None
             ),
+            segments=segments,
         )
 
     diarization: object | None = None

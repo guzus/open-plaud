@@ -14,7 +14,7 @@ import os
 import httpx
 
 from open_plaud.transcription.base import register
-from open_plaud.types import AudioRef, TranscribeOptions, Transcript
+from open_plaud.types import AudioRef, TranscribeOptions, Transcript, TranscriptSegment
 
 _API_URL = "https://api.openai.com/v1/audio/transcriptions"
 _DEFAULT_MODEL = "whisper-1"
@@ -50,7 +50,7 @@ class OpenAiWhisperTranscriber:
         files: dict[str, tuple[str, bytes, str]] = {
             "file": (audio.filename, content, content_type),
         }
-        data: dict[str, str] = {"model": self._model, "response_format": "json"}
+        data: dict[str, str] = {"model": self._model, "response_format": "verbose_json"}
         if opts.language:
             data["language"] = opts.language
         headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -76,4 +76,28 @@ class OpenAiWhisperTranscriber:
             raise RuntimeError(
                 f"openai_whisper: unexpected response shape (no 'text'): {payload!r}"
             )
-        return Transcript(text=payload["text"], language=opts.language)
+
+        segments: list[TranscriptSegment] = []
+        raw_segments = payload.get("segments", [])
+        if isinstance(raw_segments, list):
+            for item in raw_segments:
+                if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                    continue
+                raw_start = item.get("start")
+                raw_end = item.get("end")
+                segments.append(
+                    TranscriptSegment(
+                        text=item["text"].strip(),
+                        start=(
+                            float(raw_start)
+                            if isinstance(raw_start, int | float)
+                            else None
+                        ),
+                        end=(
+                            float(raw_end)
+                            if isinstance(raw_end, int | float)
+                            else None
+                        ),
+                    )
+                )
+        return Transcript(text=payload["text"], language=opts.language, segments=segments)

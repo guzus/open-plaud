@@ -1,4 +1,4 @@
-# Firmware — ESP-IDF (Waveshare ESP32-S3-LCD-1.54)
+# Firmware — ESP-IDF recorder
 
 The recorder firmware. ESP-IDF (C), no Arduino. Current milestone: **boot →
 retry any uploads a previous run left pending → hold the PLUS button to record
@@ -6,18 +6,15 @@ a numbered WAV (`rec_NNNN.wav`) to microSD → upload on release** as
 multipart/form-data. Uploaded clips move to `/sdcard/sent/`; failed uploads
 stay in the card root and are retried on the next boot.
 
-> **Status: builds clean, not yet flashed on hardware.** Compile-verified on
-> ESP-IDF v5.4.1 with `esp_codec_dev` 2.0.0 — settling the struct-field caveat
-> in the `i2s_es7210_tdm`-derived `audio.c` for that version. Pins are
-> schematic-confirmed. Runtime behavior (audio init, button polarity, SD, Wi-Fi)
-> remains unvalidated until a board is in hand.
+> **Status: both board profiles build with ESP-IDF v5.4.1, not yet flashed on
+> hardware.** The Waveshare ES7210/TDM path and custom Rev A PDM path still need
+> first-board validation before treating either image as finished.
 
 ## Prerequisites
 
 [ESP-IDF **v5.4.x+**](https://docs.espressif.com/projects/esp-idf/en/v5.4.1/esp32s3/get-started/).
 Waveshare's LCD-1.54 examples currently target ESP-IDF 5.5.1, while this repo
-still aims to keep the bring-up project on the v5.4.x line until hardware says
-otherwise.
+currently builds on the v5.4.x line until hardware says otherwise.
 
 ```bash
 git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
@@ -27,8 +24,9 @@ git clone -b v5.4.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/e
 
 ## Build · flash · monitor
 
-This board uses the ESP32-S3's **native USB-Serial/JTAG** (no UART bridge chip), so
-just plug the USB-C port into your Mac — it appears as `/dev/cu.usbmodem*`.
+The selected v0 board uses the ESP32-S3's **native USB-Serial/JTAG** (no UART
+bridge chip), so just plug the USB-C port into your Mac — it appears as
+`/dev/cu.usbmodem*`.
 
 ```bash
 cd firmware
@@ -38,8 +36,15 @@ idf.py build
 idf.py -p /dev/cu.usbmodem* flash monitor    # Ctrl-] to exit the monitor
 ```
 
-`idf.py` pulls the `esp_codec_dev` managed component on first build. If the port
-doesn't appear, hold **BOOT**, tap **RESET**, release BOOT to force download mode.
+To compile the custom PCB Rev A profile against the proposed PDM mic pin map:
+
+```bash
+idf.py -B build-rev-a -DSDKCONFIG=build-rev-a/sdkconfig \
+  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.rev_a.defaults" build
+```
+
+`idf.py` pulls managed components on first build. If the port doesn't appear,
+hold **BOOT**, tap **RESET**, release BOOT to force download mode.
 
 Insert a FAT32 microSD. On boot you should see the SD info, `audio ready: 16000 Hz…`,
 a retry pass over clips left pending by earlier runs (oldest first, up to 64 per
@@ -56,15 +61,17 @@ clears the backlog. A held button auto-stops after
 
 | File | Role |
 |---|---|
-| `main/board.h` | **pin map** (Waveshare LCD-1.54 BSP + schematic) — I2S/I2C/SD/LCD/buttons |
-| `main/audio.c` | ES7210 dual-mic capture (I2C via `esp_codec_dev`, I2S-TDM RX) |
+| `main/board.h` | **pin maps** for Waveshare LCD-1.54 and custom PCB Rev A |
+| `main/audio.c` | ES7210/TDM capture for Waveshare; direct PDM RX for Rev A |
 | `main/button.c` | PLUS button (GPIO4) — polled input + pull-up, raw level only; `app_main` debounces |
-| `main/sdcard.c` | mount microSD (FATFS, **1-bit** SDMMC: CLK=16, CMD=15, D0=17) |
+| `main/sdcard.c` | mount microSD (FATFS over configurable 1-bit/4-bit SDMMC) |
 | `main/wav.c` | streaming 16-bit PCM WAV writer |
 | `main/rec_store.c` | clip numbering (`rec_NNNN.wav`, never reused), `/sdcard/sent/` move, boot-time retry queue |
 | `main/net_upload.c` | Wi-Fi STA + multipart upload to the server |
+| `main/status.c` | LCD or RGB LED status states (boot, ready, recording, syncing, done, error) |
 | `main/app_main.c` | orchestration: mount → retry pending → hold-to-record loop → upload |
 | `sdkconfig.defaults` | 16 MB flash, octal PSRAM, USB-JTAG console, custom partitions |
+| `sdkconfig.rev_a.defaults` | custom PCB Rev A compile profile |
 
 ## Device → server contract (target)
 
@@ -81,16 +88,20 @@ Content-Type: multipart/form-data
 
 Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 
+- `OPEN_PLAUD_BOARD_WAVESHARE_LCD154` / `OPEN_PLAUD_BOARD_CUSTOM_REV_A`
 - `OPEN_PLAUD_WIFI_SSID`
 - `OPEN_PLAUD_WIFI_PASSWORD`
 - `OPEN_PLAUD_SERVER_URL` (base URL, for example `http://192.168.1.50:8000`)
 - `OPEN_PLAUD_WIFI_MAX_RETRIES`
 - `OPEN_PLAUD_UPLOAD_TIMEOUT_MS`
 - `OPEN_PLAUD_MAX_REC_SECONDS` (auto-stop for a held button, default 1800)
+- `OPEN_PLAUD_AUDIO_READ_TIMEOUT_MS`
+- `OPEN_PLAUD_AUDIO_READ_MAX_ERRORS`
+- `OPEN_PLAUD_SDMMC_WIDTH` (1-bit default; 4-bit only after hardware validation)
 
 ## Validate on first hardware bring-up
 
-A source review (server contract cross-checked) found the upload seam correct —
+A source review plus local ESP-IDF build found the upload seam correct —
 multipart field `file`, `.wav`, path `/v1/recordings` all match the server. Open
 items to confirm with a board in hand:
 
@@ -118,6 +129,9 @@ items to confirm with a board in hand:
   to mono before upload (halves file size and cloud-Whisper cost) unless
   diarization needs both. Not a correctness issue: server-side `whisper_cpp` was
   verified to transcribe device-shaped stereo 16 kHz WAVs as-is.
+- **Custom Rev A PDM path.** The proposed pin map compiles with ESP-IDF PDM RX
+  and RGB status output, but the schematic, mic select wiring, acoustic ports,
+  and LED polarity still need board-level validation.
 
 A corrupt-clip guard is already in place: `app_main.c` aborts on a failed SD
 write and refuses to upload if the WAV header can't be patched on close. Caveat:
@@ -132,8 +146,7 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
 - [ ] Make `wifi_connect` re-enterable (clean up netif/handlers on a failed join)
       so uploads can retry within a boot instead of latching off until reboot.
-- [ ] LCD status UI via ST7789 (staged bring-up states: boot → SD → audio →
-      recording → done/error).
+- [x] LCD/log status UI via ST7789/RGB state colors.
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 
 ## Sources

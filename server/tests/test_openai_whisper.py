@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from open_plaud.transcription.openai_whisper import OpenAiWhisperTranscriber
-from open_plaud.types import AudioRef, TranscribeOptions, Transcript
+from open_plaud.types import AudioRef, TranscribeOptions
 
 
 def _audio(tmp_path: Path, content: bytes = b"RIFF....WAVEfmt ") -> AudioRef:
@@ -29,7 +29,13 @@ async def test_transcribe_returns_transcript_and_sends_audio(tmp_path: Path) -> 
         body = request.read()
         captured["body"] = body
         captured["auth"] = request.headers["Authorization"].encode()
-        return httpx.Response(200, json={"text": "hello world"})
+        return httpx.Response(
+            200,
+            json={
+                "text": "hello world",
+                "segments": [{"start": 0.0, "end": 1.5, "text": "hello world"}],
+            },
+        )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
@@ -42,11 +48,17 @@ async def test_transcribe_returns_transcript_and_sends_audio(tmp_path: Path) -> 
     finally:
         await client.aclose()
 
-    assert result == Transcript(text="hello world", language=None)
+    assert result.text == "hello world"
+    assert result.language is None
+    assert len(result.segments) == 1
+    assert result.segments[0].text == "hello world"
+    assert result.segments[0].start == 0.0
+    assert result.segments[0].end == 1.5
     body = captured["body"]
     assert audio_bytes in body  # the file bytes were uploaded
     assert b'name="file"' in body
     assert b"whisper-1" in body  # the model field is present
+    assert b"verbose_json" in body
     assert captured["auth"] == b"Bearer test-key"
 
 

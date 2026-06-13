@@ -1,5 +1,24 @@
 menu "open-plaud"
 
+    choice OPEN_PLAUD_BOARD_VARIANT
+        prompt "Board variant"
+        default OPEN_PLAUD_BOARD_WAVESHARE_LCD154
+        help
+            Select the hardware pin map and low-level audio/status backend.
+
+        config OPEN_PLAUD_BOARD_WAVESHARE_LCD154
+            bool "Waveshare ESP32-S3-LCD-1.54"
+            help
+                v0 reference board: ES7210 analog microphone ADC, ST7789 LCD,
+                and bundled battery SKU.
+
+        config OPEN_PLAUD_BOARD_CUSTOM_REV_A
+            bool "Custom PCB Rev A"
+            help
+                Proposed custom board: direct PDM MEMS microphones and RGB LED
+                status, no LCD or ES7210 codec.
+    endchoice
+
     config OPEN_PLAUD_WIFI_SSID
         string "Wi-Fi SSID"
         default ""
@@ -36,5 +55,40 @@ menu "open-plaud"
         help
             Hold-to-record auto-stops after this many seconds, so a stuck or
             forgotten PLUS button cannot fill the card with one endless WAV.
+
+    config OPEN_PLAUD_AUDIO_READ_MAX_ERRORS
+        int "Consecutive audio read failures before abort"
+        default 20
+        range 1 1000
+        help
+            Prevents a tight infinite loop if I2S starts returning errors or
+            zero-byte reads during bring-up.
+
+    config OPEN_PLAUD_AUDIO_READ_TIMEOUT_MS
+        int "Audio read timeout in milliseconds"
+        default 500
+        range 10 10000
+        help
+            Finite I2S read timeout; callers can abort clips instead of hanging
+            forever on a wedged DMA/clock path.
+
+    choice OPEN_PLAUD_SDMMC_WIDTH_CHOICE
+        prompt "SDMMC bus width"
+        default OPEN_PLAUD_SDMMC_WIDTH_1
+        help
+            The LCD-1.54 bring-up path defaults to 1-bit SDMMC. Use 4-bit only
+            after hardware validation confirms CMD/D0-D3 are stable.
+
+        config OPEN_PLAUD_SDMMC_WIDTH_1
+            bool "1-bit"
+
+        config OPEN_PLAUD_SDMMC_WIDTH_4
+            bool "4-bit"
+    endchoice
+
+    config OPEN_PLAUD_SDMMC_WIDTH
+        int
+        default 4 if OPEN_PLAUD_SDMMC_WIDTH_4
+        default 1
 
 endmenu

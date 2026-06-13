@@ -1,0 +1,7 @@
+# Custom PCB Rev A compile profile.
+# Use with:
+#   idf.py -B build-rev-a -DSDKCONFIG=build-rev-a/sdkconfig \
+#       -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.rev_a.defaults" build
+
+CONFIG_OPEN_PLAUD_BOARD_CUSTOM_REV_A=y
+CONFIG_OPEN_PLAUD_SDMMC_WIDTH_1=y

@@ -2,7 +2,7 @@
 
 ## Design goals
 
-1. **Cloud-first, local-ready.** Transcription works out of the box with a cloud API, but every transcription provider implements the same interface. Adding desktop/mobile local inference later is a new class, not a rewrite.
+1. **Cloud-first, local-capable.** Transcription works with a cloud API or local providers, and every transcription provider implements the same interface. Adding more desktop/mobile inference later is a new class, not a rewrite.
 2. **Pipeline is provider-agnostic end to end.** Transcription, diarization, and summarization are each swappable behind a protocol. The orchestrator never imports a concrete provider.
 3. **The device is dumb on purpose.** Firmware records WAV and uploads. All intelligence lives server-side, so the same firmware works as models improve.
 
@@ -22,7 +22,7 @@
         +-----------------+------------------+
         v                 v                  v
   [transcription]    [diarization]     [summarization]
-  Provider (cloud)   speaker turns     LLM (Claude/GPT/...)
+  Provider           speaker turns     LLM
         |                 |                  |
         +-----------------+------------------+
                           v
@@ -34,7 +34,7 @@
 
 ## The pluggable layer (why this matters)
 
-Each stage is defined by a `Protocol`. Concrete providers register themselves; the orchestrator resolves them by name from config. This is what lets "cloud now → local later" happen cleanly.
+Each stage is defined by a `Protocol`. Concrete providers register themselves; the orchestrator resolves them by name from config. This is what lets cloud and local providers coexist without changing the pipeline.
 
 ```python
 class TranscriptionProvider(Protocol):
@@ -42,40 +42,46 @@ class TranscriptionProvider(Protocol):
     async def transcribe(self, audio: AudioRef, opts: TranscribeOptions) -> Transcript: ...
 ```
 
-Providers planned:
+Providers:
 
 | Stage | Implemented | Later |
 |---|---|---|
-| Transcription | OpenAI Whisper API (cloud), `whisper_cpp` (local, wraps `whisper-cli`) | Deepgram, Groq-Whisper, on-device mobile (Core ML / TFLite) |
-| Diarization | pyannote via API, AssemblyAI | local `pyannote.audio`, `whisperx` |
-| Summarization | Claude, GPT, Gemini | local Llama/Qwen via Ollama |
+| Transcription | `none`, OpenAI Whisper API, `whisper_cpp` CLI, iOS on-device Speech package | Core ML / TFLite Whisper engine |
+| Diarization | `none`, `pyannote`, `whisperx` | AssemblyAI or other hosted diarization |
+| Summarization | `none`, Claude, Ollama | GPT, Gemini, other local models |
 
 Selection is config-driven:
 
 ```toml
 [pipeline]
-transcription = "openai_whisper"
-diarization   = "none"          # opt-in; off by default
-summarization = "claude"
+transcription = "openai_whisper" # or "whisper_cpp"
+diarization   = "none"          # opt-in: "pyannote" or "whisperx"
+summarization = "claude"         # or "ollama"
 ```
 
-Switching to local is just `transcription = "whisper_cpp"` — that provider wraps
-the whisper.cpp CLI (`OP_WHISPER_CPP_BIN` / `OP_WHISPER_CPP_MODEL`); no
-orchestrator change was needed, which is the point of the interface.
+Switching to local desktop transcription is just `transcription = "whisper_cpp"`
+plus `OP_WHISPER_CPP_MODEL=/path/to/model.bin` — no orchestrator change.
 
-## Why cloud-first (per project decision)
+## Why providers, not forks
 
-Local inference (whisper.cpp / on-device) is on the roadmap, not the v0 default. Cloud-first gets a working end-to-end loop fastest and keeps the device firmware identical regardless of where transcription runs. The interface is designed so the local backends slot in as additional providers.
+Cloud providers still get a working end-to-end loop fastest for many users, while local providers keep private audio on hardware you control. The device firmware stays identical either way; choosing OpenAI Whisper, `whisper_cpp`, iOS Speech, Claude, Ollama, or diarization is a server/mobile configuration decision, not a firmware fork.
 
-Current repository state: the loop runs end to end. The `openai_whisper` (cloud) and `whisper_cpp` (local) transcription providers and the `claude` summarization provider are implemented behind the protocols; the upload endpoint runs the pipeline as a background task; recordings persist in SQLite. The first "local later" backend has landed exactly as designed — as a new provider, with no orchestrator change. On-device mobile remains future work behind the same interface.
+Current repository state: the loop runs end to end. The `openai_whisper` and
+`whisper_cpp` server transcription providers, the iOS on-device Speech package,
+the `pyannote` / `whisperx` diarization providers, plus the `claude` and
+`ollama` summarization providers are implemented behind small contracts; the
+upload endpoint runs the server pipeline as a background task; recordings
+persist in SQLite. A bundled Core ML / TFLite Whisper mobile engine remains a
+future optional backend.
 
 ## Components
 
 - `server/open_plaud/api` — FastAPI app, routes, schemas, + Jinja2 web UI (`templates/`)
 - `server/open_plaud/pipeline` — orchestrator + job state machine
 - `server/open_plaud/transcription` — provider protocol + `none` / `openai_whisper` / `whisper_cpp`
-- `server/open_plaud/diarization` — provider protocol (no-op default)
-- `server/open_plaud/summarization` — LLM provider protocol + `none` / `claude`
+- `mobile/ios` — SwiftPM package for iOS on-device transcription
+- `server/open_plaud/diarization` — provider protocol + `none` / `pyannote` / `whisperx`
+- `server/open_plaud/summarization` — LLM provider protocol + `none` / `claude` / `ollama`
 - `server/open_plaud/store.py` — SQLite persistence; audio blobs on local FS
 - `firmware/` — ESP-IDF project for the recorder
 - `hardware/` — BOM, case, wiring

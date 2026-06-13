@@ -15,17 +15,17 @@ Where to actually buy each part if you're in Seoul. Prices are approximate
 |---|---|---:|---|---|
 | 1 | **Waveshare ESP32-S3-LCD-1.54 with battery** | Waveshare **$15.99 + shipping** · AliExpress ~₩26k | Waveshare official SKU 33867, or AliExpress if shipping is better | `ESP32-S3-LCD-1.54 Waveshare battery` |
 | 2 | **microSD 64GB** | ~₩15–25k | 쿠팡 로켓배송 / 다이소 / 하이마트 | `마이크로SD 64GB 삼성 샌디스크` |
-| 3 | **3D print case** | ~₩5–15k | 세운상가 출력집 or online 3D print service | LCD-1.54 STL is TODO; use board in-hand measurements |
+| 3 | **3D print case** | ~₩5–15k | 세운상가 출력집 or online 3D print service | First-article LCD-1.54 STL exists; use board-in-hand measurements for the second article |
 | 4 | **USB-C cable** | ~₩3–10k | already likely owned / 쿠팡 / 다이소 | `USB C 케이블 데이터` |
 | 5 | Optional MagSafe metal ring | ~₩3–5k | 쿠팡 / 다이소 | `맥세이프 메탈링` |
 
 Buy the **battery-included SKU**, not the `-EN` no-battery SKU. This avoids
 separate LiPo polarity/connector risk for the first recorder build.
 
-Immediate caveat: the repo has first-article STLs for AUDIO-board and XIAO, but
-not yet for LCD-1.54. The right next CAD step is to measure the LCD-1.54 board
-and bundled battery once it arrives, then generate the case around real caliper
-data.
+Immediate caveat: the repo has first-article STLs for AUDIO-board, XIAO, and
+LCD-1.54, but the LCD-1.54 shell is still based on published dimensions rather
+than caliper data. The right next CAD step is to measure the LCD-1.54 board and
+bundled battery once it arrives, then tune the case around real measurements.
 
 > **Verified:** the [Waveshare ESP32-S3-AUDIO-Board](https://www.waveshare.com/esp32-s3-audio-board.htm)
 > comes in **two SKUs — board-only ($16) and "+battery" ($18)**. The battery is an

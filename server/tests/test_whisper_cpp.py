@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from open_plaud import transcription
 from open_plaud.transcription.whisper_cpp import WhisperCppTranscriber
-from open_plaud.types import AudioRef, TranscribeOptions, Transcript
+from open_plaud.types import AudioRef, TranscribeOptions
 
 
 def _audio(tmp_path: Path, content: bytes = b"RIFF....WAVEfmt ") -> AudioRef:
@@ -27,8 +28,6 @@ def _model(tmp_path: Path) -> Path:
     return model
 
 
-# What `whisper-cli -oj` actually writes (abridged): segment texts come with
-# leading whitespace, plus top-level keys the parser must ignore.
 _PAYLOAD = json.dumps(
     {
         "systeminfo": "AVX = 1 | NEON = 1 |",
@@ -41,7 +40,7 @@ _PAYLOAD = json.dumps(
                 "offsets": {"from": 0, "to": 2000},
                 "text": " Hello",
             },
-            {"text": "  world. "},
+            {"offsets": {"from": 2000, "to": 3000}, "text": "  world. "},
         ],
     }
 )
@@ -54,14 +53,6 @@ def _fake_cli(
     exit_code: int = 0,
     stderr_line: str | None = None,
 ) -> Path:
-    """Build a fake whisper-cli executable.
-
-    Mimics the real CLI's contract: records its argv (one per line) to
-    `<tmp_path>/args.txt` and, when given a payload, writes it to
-    `<value after -of>.json` — whisper.cpp appends the `.json` extension
-    itself. This exercises the real subprocess + JSON parsing path without
-    whisper.cpp installed.
-    """
     args_file = tmp_path / "args.txt"
     lines = [
         "#!/bin/sh",
@@ -89,19 +80,31 @@ def _fake_cli(
 async def test_transcribe_runs_cli_and_joins_segment_texts(tmp_path: Path) -> None:
     model = _model(tmp_path)
     audio = _audio(tmp_path)
-    provider = WhisperCppTranscriber(bin_path=_fake_cli(tmp_path), model_path=model)
+    provider = WhisperCppTranscriber(
+        bin_path=_fake_cli(tmp_path),
+        model_path=model,
+        timeout_seconds=5,
+        extra_args=("--best-of", "1"),
+    )
 
     result = await provider.transcribe(audio, TranscribeOptions())
 
-    assert result == Transcript(text="Hello world.", language=None)
+    assert result.text == "Hello world."
+    assert result.language is None
+    assert result.segments[0].text == "Hello"
+    assert result.segments[0].start == 0.0
+    assert result.segments[0].end == 2.0
+    assert result.segments[1].text == "world."
+    assert result.segments[1].start == 2.0
+    assert result.segments[1].end == 3.0
     args = (tmp_path / "args.txt").read_text().splitlines()
     assert args[args.index("-m") + 1] == str(model)
     assert args[args.index("-f") + 1] == str(audio.path)
-    assert "-oj" in args  # JSON output requested
-    assert "-np" in args  # keep the CLI quiet
-    assert "-l" not in args  # no language requested
+    assert "-oj" in args
+    assert "-np" in args
+    assert "-l" not in args
+    assert ["--best-of", "1"] == args[-2:]
     out_base = args[args.index("-of") + 1]
-    # The JSON went to a per-call temp dir (not the audio dir) and was cleaned up.
     assert Path(out_base).parent != audio.path.parent
     assert not Path(f"{out_base}.json").exists()
 
@@ -121,33 +124,44 @@ async def test_language_flag_forwarded_when_set(tmp_path: Path) -> None:
 async def test_config_resolved_from_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The registry instantiates providers with no args; everything comes from env.
     monkeypatch.setenv("OP_WHISPER_CPP_BIN", str(_fake_cli(tmp_path)))
     monkeypatch.setenv("OP_WHISPER_CPP_MODEL", str(_model(tmp_path)))
+    monkeypatch.setenv("OP_WHISPER_CPP_ARGS", "--max-len 80")
 
     provider = WhisperCppTranscriber()
     result = await provider.transcribe(_audio(tmp_path), TranscribeOptions())
 
     assert result.text == "Hello world."
+    args = (tmp_path / "args.txt").read_text().splitlines()
+    assert ["--max-len", "80"] == args[-2:]
+
+
+def test_legacy_constructor_names_still_work(tmp_path: Path) -> None:
+    provider = WhisperCppTranscriber(
+        binary=_fake_cli(tmp_path),
+        model=_model(tmp_path),
+        timeout_seconds=5,
+    )
+    assert provider.name == "whisper_cpp"
 
 
 async def test_missing_binary_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("OP_WHISPER_CPP_BIN", raising=False)
-    monkeypatch.setenv("PATH", str(tmp_path))  # no whisper-cli anywhere on PATH
+    monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(RuntimeError, match="OP_WHISPER_CPP_BIN"):
         WhisperCppTranscriber(model_path=_model(tmp_path))
 
 
-async def test_nonexecutable_bin_path_raises(tmp_path: Path) -> None:
+def test_nonexecutable_bin_path_raises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="brew install whisper-cpp"):
         WhisperCppTranscriber(
             bin_path=tmp_path / "missing-whisper-cli", model_path=_model(tmp_path)
         )
 
 
-async def test_missing_model_env_raises(
+def test_missing_model_env_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("OP_WHISPER_CPP_MODEL", raising=False)
@@ -155,7 +169,7 @@ async def test_missing_model_env_raises(
         WhisperCppTranscriber(bin_path=_fake_cli(tmp_path))
 
 
-async def test_nonexistent_model_file_raises(tmp_path: Path) -> None:
+def test_nonexistent_model_file_raises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="OP_WHISPER_CPP_MODEL"):
         WhisperCppTranscriber(
             bin_path=_fake_cli(tmp_path), model_path=tmp_path / "no-such-model.bin"
@@ -172,7 +186,7 @@ async def test_nonzero_exit_raises_with_stderr(tmp_path: Path) -> None:
 
 
 async def test_missing_json_output_raises(tmp_path: Path) -> None:
-    bin_path = _fake_cli(tmp_path, payload=None)  # exits 0 without writing JSON
+    bin_path = _fake_cli(tmp_path, payload=None)
     provider = WhisperCppTranscriber(bin_path=bin_path, model_path=_model(tmp_path))
     with pytest.raises(RuntimeError, match="produced no JSON"):
         await provider.transcribe(_audio(tmp_path), TranscribeOptions())
@@ -190,3 +204,7 @@ async def test_unexpected_json_shape_raises(tmp_path: Path) -> None:
     provider = WhisperCppTranscriber(bin_path=bin_path, model_path=_model(tmp_path))
     with pytest.raises(RuntimeError, match="unexpected JSON shape"):
         await provider.transcribe(_audio(tmp_path), TranscribeOptions())
+
+
+def test_package_wiring_exposes_whisper_cpp() -> None:
+    assert "whisper_cpp" in transcription.available()

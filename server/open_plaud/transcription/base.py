@@ -4,8 +4,8 @@ The whole "cloud now, local later" decision lives behind this Protocol. The
 orchestrator depends only on `TranscriptionProvider`; concrete backends register
 themselves under a name and are resolved from config.
 
-Today: cloud providers (OpenAI Whisper API, etc).
-Later: `whisper_cpp`, on-device mobile — added as new registrations, no caller change.
+Today: `none`, OpenAI Whisper API, and local `whisper_cpp`.
+Later: on-device mobile — added as a new registration, no caller change.
 """
 from __future__ import annotations
 

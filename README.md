@@ -15,7 +15,7 @@ Commercial AI recorders ship cheap hardware and monetize a cloud subscription th
 |---|---|---|
 | Hardware | Closed, ~$159+ | Open, ~₩40–70k DIY |
 | Transcription | Cloud-only, minute-capped | Pluggable: cloud (OpenAI) or local (whisper.cpp) |
-| Summarization | Their templates | Any LLM (Claude / GPT / local) |
+| Summarization | Their templates | Claude or local Ollama |
 | Recordings | Their cloud | Your storage |
 | Cost model | Subscription | Pay-per-use or free (local) |
 
@@ -24,22 +24,23 @@ Commercial AI recorders ship cheap hardware and monetize a cloud subscription th
 ```
 open-plaud/
 ├── firmware/      ESP32-S3 firmware (ESP-IDF) — record, sync over Wi-Fi
-├── hardware/      BOM, 3D-print case files, wiring diagrams
+├── hardware/      BOM, 3D-print case files, pilot PCB notes
+├── mobile/        iOS on-device transcription package
 ├── server/        Python pipeline: ingest → transcribe → diarize → summarize
-└── docs/          Architecture, roadmap, hardware decision, prior art, research
+├── docs/          Architecture, roadmap, hardware decisions, prior art, research
+└── .github/       CI for server checks
 ```
 
 ## Status
 
 The server loop works end to end: upload → transcribe → summarize → browse.
-Transcription runs in the cloud (OpenAI Whisper) **or fully local via
-whisper.cpp — no API key**; summarization uses Claude. All providers sit behind
-the pipeline's protocols and are selected by config; recordings persist in
-SQLite and survive restarts; a small web UI lists, plays, and exports them. The
-default providers are `none` (no key required) so the server runs offline out
-of the box. On-device mobile inference can be added later as another provider
-without touching the rest of the pipeline. See `docs/ARCHITECTURE.md` and
-`docs/ROADMAP.md`.
+Cloud transcription (OpenAI Whisper), local desktop transcription
+(`whisper_cpp`), on-device iOS transcription, cloud summarization (Claude),
+local summarization (Ollama), and optional `pyannote` / `whisperx` diarization
+are implemented behind small provider contracts; recordings persist in SQLite
+and survive restarts; a small web UI lists, plays, and exports them. The default
+server providers are `none` (no key required) so the server runs offline out of
+the box. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
 
 Related-project research and positioning notes live in `docs/PRIOR_ART.md` and
 `docs/POSITIONING.md`.
@@ -83,14 +84,23 @@ OP_PIPELINE__TRANSCRIPTION=openai_whisper   # needs OPENAI_API_KEY
 OP_PIPELINE__SUMMARIZATION=claude           # needs ANTHROPIC_API_KEY
 ```
 
-Or transcribe fully locally — no transcription key, audio never leaves your
-machine (`brew install whisper-cpp`, download a ggml model):
+Local desktop transcription uses an installed whisper.cpp CLI and model:
 
 ```bash
-OP_PIPELINE__TRANSCRIPTION=whisper_cpp      # needs whisper-cli + OP_WHISPER_CPP_MODEL
+OP_PIPELINE__TRANSCRIPTION=whisper_cpp
+OP_WHISPER_CPP_MODEL=/path/to/ggml-model.bin
+# OP_WHISPER_CPP_BIN=whisper-cli            # override if your binary name differs
 ```
 
-See `server/.env.example` for the `whisper_cpp` binary/model settings.
+Local summarization uses a running Ollama server:
+
+```bash
+OP_PIPELINE__SUMMARIZATION=ollama
+OP_OLLAMA_MODEL=qwen2.5:7b                  # or any model installed in Ollama
+```
+
+See `server/.env.example` for the `whisper_cpp`, Ollama, and diarization
+settings.
 
 `uv` reads the pinned interpreter from `.python-version` (installing it if missing).
 Dev tools (pytest, ruff, mypy) come with `uv sync` — run them via `uv run pytest`,
