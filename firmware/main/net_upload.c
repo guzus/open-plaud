@@ -18,6 +18,13 @@ static const char *TAG = "net_upload";
 #define UPLOAD_CHUNK_BYTES 4096
 
 static EventGroupHandle_t s_wifi_events;
+static esp_netif_t *s_wifi_netif;
+static bool s_netif_ready;
+static bool s_event_loop_ready;
+static bool s_wifi_driver_ready;
+static bool s_wifi_handler_registered;
+static bool s_ip_handler_registered;
+static bool s_wifi_initialized;
 static bool s_wifi_started;
 static int s_retry_count;
 static char s_upload_chunk[UPLOAD_CHUNK_BYTES];
@@ -31,6 +38,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_wifi_events) {
+            xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
+        }
         if (s_retry_count < CONFIG_OPEN_PLAUD_WIFI_MAX_RETRIES) {
             s_retry_count++;
             ESP_LOGW(TAG, "Wi-Fi disconnected, retrying (%d/%d)",
@@ -43,40 +53,66 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Wi-Fi connected: " IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_count = 0;
+        xEventGroupClearBits(s_wifi_events, WIFI_FAIL_BIT);
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
     }
 }
 
-static esp_err_t wifi_connect(void)
+static esp_err_t wifi_init_once(void)
 {
     if (strlen(CONFIG_OPEN_PLAUD_WIFI_SSID) == 0) {
         ESP_LOGW(TAG, "Wi-Fi SSID is empty; configure it with idf.py menuconfig");
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (s_wifi_started) {
+    if (s_wifi_initialized) {
         return ESP_OK;
     }
 
-    ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif_init");
-    esp_err_t event_loop = esp_event_loop_create_default();
-    if (event_loop != ESP_OK && event_loop != ESP_ERR_INVALID_STATE) {
-        ESP_RETURN_ON_ERROR(event_loop, TAG, "event_loop");
+    if (!s_netif_ready) {
+        esp_err_t err = esp_netif_init();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_RETURN_ON_ERROR(err, TAG, "netif_init");
+        }
+        s_netif_ready = true;
     }
-    ESP_RETURN_ON_FALSE(esp_netif_create_default_wifi_sta(), ESP_FAIL, TAG, "wifi_netif");
 
-    wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_RETURN_ON_ERROR(esp_wifi_init(&init_cfg), TAG, "wifi_init");
+    if (!s_event_loop_ready) {
+        esp_err_t err = esp_event_loop_create_default();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+            ESP_RETURN_ON_ERROR(err, TAG, "event_loop");
+        }
+        s_event_loop_ready = true;
+    }
 
-    s_wifi_events = xEventGroupCreate();
-    ESP_RETURN_ON_FALSE(s_wifi_events, ESP_ERR_NO_MEM, TAG, "event_group");
+    if (!s_wifi_netif) {
+        s_wifi_netif = esp_netif_create_default_wifi_sta();
+        ESP_RETURN_ON_FALSE(s_wifi_netif, ESP_FAIL, TAG, "wifi_netif");
+    }
 
-    ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                                   &wifi_event_handler, NULL),
-                        TAG, "wifi_event_handler");
-    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                                   &wifi_event_handler, NULL),
-                        TAG, "ip_event_handler");
+    if (!s_wifi_driver_ready) {
+        wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_RETURN_ON_ERROR(esp_wifi_init(&init_cfg), TAG, "wifi_init");
+        s_wifi_driver_ready = true;
+    }
+
+    if (!s_wifi_events) {
+        s_wifi_events = xEventGroupCreate();
+        ESP_RETURN_ON_FALSE(s_wifi_events, ESP_ERR_NO_MEM, TAG, "event_group");
+    }
+
+    if (!s_wifi_handler_registered) {
+        ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                       &wifi_event_handler, NULL),
+                            TAG, "wifi_event_handler");
+        s_wifi_handler_registered = true;
+    }
+    if (!s_ip_handler_registered) {
+        ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                                       &wifi_event_handler, NULL),
+                            TAG, "ip_event_handler");
+        s_ip_handler_registered = true;
+    }
 
     wifi_config_t wifi_cfg = { 0 };
     snprintf((char *)wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), "%s",
@@ -89,14 +125,42 @@ static esp_err_t wifi_connect(void)
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "wifi_mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg), TAG, "wifi_config");
-    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi_start");
+    s_wifi_initialized = true;
+    return ESP_OK;
+}
 
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_events,
-                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                                           pdFALSE, pdFALSE, portMAX_DELAY);
+static esp_err_t wifi_connect(void)
+{
+    ESP_RETURN_ON_ERROR(wifi_init_once(), TAG, "wifi_init_once");
+
+    EventBits_t bits = xEventGroupGetBits(s_wifi_events);
     if (bits & WIFI_CONNECTED_BIT) {
-        s_wifi_started = true;
         return ESP_OK;
+    }
+
+    xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    s_retry_count = 0;
+
+    if (!s_wifi_started) {
+        ESP_LOGI(TAG, "starting Wi-Fi STA");
+        ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi_start");
+        s_wifi_started = true;
+    } else {
+        ESP_LOGI(TAG, "reconnecting Wi-Fi STA");
+        ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "wifi_connect");
+    }
+
+    bits = xEventGroupWaitBits(s_wifi_events,
+                               WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                               pdFALSE, pdFALSE,
+                               pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_UPLOAD_TIMEOUT_MS));
+    if (bits & WIFI_CONNECTED_BIT) {
+        return ESP_OK;
+    }
+    if ((bits & WIFI_FAIL_BIT) == 0) {
+        ESP_LOGW(TAG, "Wi-Fi connect timed out after %d ms",
+                 CONFIG_OPEN_PLAUD_UPLOAD_TIMEOUT_MS);
+        return ESP_ERR_TIMEOUT;
     }
     return ESP_FAIL;
 }

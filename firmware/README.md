@@ -4,7 +4,8 @@ The recorder firmware. ESP-IDF (C), no Arduino. Current milestone: **boot →
 retry any uploads a previous run left pending → hold the PLUS button to record
 a numbered WAV (`rec_NNNN.wav`) to microSD → upload on release** as
 multipart/form-data. Uploaded clips move to `/sdcard/sent/`; failed uploads
-stay in the card root and are retried on the next boot.
+stay in the card root and are retried on the next boot or after a later
+successful upload in the same boot.
 
 > **Status: both board profiles build with ESP-IDF v5.4.1, not yet flashed on
 > hardware.** The Waveshare ES7210/TDM path and custom Rev A PDM path still need
@@ -52,8 +53,8 @@ boot), then `ready — hold PLUS (GPIO4) to record`. Hold **PLUS** to record
 `rec_0001.wav`, `rec_0002.wav`, … (numbers are never reused — the root *and*
 `/sdcard/sent/` are scanned); release to stop and upload to
 `POST {server}/v1/recordings`. On success the clip moves to `/sdcard/sent/`. On
-the first upload failure the firmware stops trying for the rest of this boot
-(Wi-Fi is likely down) and keeps recording to SD; the next boot's retry pass
+upload failure the clip stays in the SD root; the next upload attempt can
+re-enter Wi-Fi setup in the same boot, and the next boot's retry pass also
 clears the backlog. A held button auto-stops after
 `OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s) and a new press starts a new clip.
 
@@ -144,8 +145,8 @@ inspect/remove such clips before rebooting if that matters.
 - [ ] Flash on hardware and tune the first real Wi-Fi/audio bring-up issues.
 - [x] Hold-to-record button via direct GPIO (`BSP_PLUS_BUTTON_GPIO`, GPIO4).
 - [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
-- [ ] Make `wifi_connect` re-enterable (clean up netif/handlers on a failed join)
-      so uploads can retry within a boot instead of latching off until reboot.
+- [x] Make `wifi_connect` re-enterable so uploads can retry within a boot
+      instead of latching off until reboot.
 - [x] LCD/log status UI via ST7789/RGB state colors.
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 

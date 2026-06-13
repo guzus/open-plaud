@@ -5,7 +5,7 @@
  * a previous run failed to upload. Then loop forever: hold PLUS to record a
  * numbered WAV (rec_NNNN.wav, never reused), release to stop and upload.
  * Uploaded clips move to /sdcard/sent; failed uploads stay in the card root
- * for the next boot's retry pass. The device stays dumb on purpose
+ * for a later retry in this boot or the next boot. The device stays dumb on purpose
  * (docs/ARCHITECTURE.md): record locally, upload raw audio, let the server do
  * the thinking.
  */
@@ -42,6 +42,17 @@ static void wait_for_button(bool pressed)
     while (agree < BTN_DEBOUNCE_POLLS) {
         vTaskDelay(pdMS_TO_TICKS(BTN_POLL_MS));
         agree = (button_pressed() == pressed) ? agree + 1 : 0;
+    }
+}
+
+static void retry_pending_clips(const char *context)
+{
+    bool upload_failed = false;
+    int cleared = rec_store_retry_pending(&upload_failed);
+    ESP_LOGI(TAG, "%s retry queue: %d pending clip(s) uploaded", context, cleared);
+    if (upload_failed) {
+        ESP_LOGW(TAG, "%s retry queue not fully drained; clips stay queued on SD",
+                 context);
     }
 }
 
@@ -159,18 +170,12 @@ void app_main(void)
         return;
     }
 
-    /* Drain the retry queue once per boot, before any new recording. A failure
-     * here (or later) latches uploads off for the rest of this boot: Wi-Fi is
-     * likely down, and net_upload's one-shot Wi-Fi bring-up is not safely
-     * re-enterable after a failed join - recording keeps working, clips queue.
+    /* Drain the retry queue once per boot, before any new recording. Upload
+     * failures are no longer latched for the whole boot: each later upload can
+     * re-enter Wi-Fi setup and try again after the network or server recovers.
      */
     status_show(OPEN_PLAUD_STATUS_SYNCING);
-    bool upload_down = false;
-    int cleared = rec_store_retry_pending(&upload_down);
-    ESP_LOGI(TAG, "retry queue: %d pending clip(s) uploaded", cleared);
-    if (upload_down) {
-        ESP_LOGW(TAG, "upload unavailable - recording to SD only until next boot");
-    }
+    retry_pending_clips("boot");
 
     ESP_LOGI(TAG, "ready - hold PLUS (GPIO%d) to record", BSP_PLUS_BUTTON_GPIO);
     char path[32];
@@ -182,22 +187,18 @@ void app_main(void)
             ESP_LOGE(TAG, "no usable clip name - recording skipped");
             status_show(OPEN_PLAUD_STATUS_ERROR);
         } else if (record_clip(path) == ESP_OK) {
-            if (upload_down) {
-                ESP_LOGW(TAG, "%s queued for next-boot retry (upload unavailable)", path);
+            status_show(OPEN_PLAUD_STATUS_SYNCING);
+            if (net_upload_wav(path) == ESP_OK) {
+                ESP_LOGI(TAG, "uploaded %s", path);
+                if (rec_store_mark_sent(path) != ESP_OK) {
+                    ESP_LOGW(TAG, "%s uploaded but not moved to /sent - it may re-upload next boot", path);
+                } else {
+                    retry_pending_clips("post-upload");
+                }
                 status_show(OPEN_PLAUD_STATUS_DONE);
             } else {
-                status_show(OPEN_PLAUD_STATUS_SYNCING);
-                if (net_upload_wav(path) == ESP_OK) {
-                    ESP_LOGI(TAG, "uploaded %s", path);
-                    if (rec_store_mark_sent(path) != ESP_OK) {
-                        ESP_LOGW(TAG, "%s uploaded but not moved to /sent - it may re-upload next boot", path);
-                    }
-                    status_show(OPEN_PLAUD_STATUS_DONE);
-                } else {
-                    upload_down = true;
-                    ESP_LOGW(TAG, "upload failed; %s queued for next-boot retry", path);
-                    status_show(OPEN_PLAUD_STATUS_ERROR);
-                }
+                ESP_LOGW(TAG, "upload failed; %s queued on SD for retry", path);
+                status_show(OPEN_PLAUD_STATUS_ERROR);
             }
         } else {
             status_show(OPEN_PLAUD_STATUS_ERROR);

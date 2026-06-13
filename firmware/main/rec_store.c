@@ -149,7 +149,7 @@ int rec_store_retry_pending(bool *out_upload_failed)
         char path[32];
         snprintf(path, sizeof path, SDCARD_MOUNT_POINT "/rec_%04u.wav", pending[i]);
         if (net_upload_wav(path) != ESP_OK) {
-            ESP_LOGW(TAG, "retry stopped at %s — %u clip(s) stay queued for next boot",
+            ESP_LOGW(TAG, "retry stopped at %s — %u clip(s) stay queued",
                      path, (unsigned)(count - i));
             if (out_upload_failed) *out_upload_failed = true;
             break;

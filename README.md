@@ -49,6 +49,10 @@ Current v0 hardware target: **Waveshare ESP32-S3-LCD-1.54 + battery**. It keeps
 the important recorder pieces under $30: dual mic + ES7210 ADC, battery
 charging, TF/microSD, Wi-Fi, and a small status LCD.
 
+First-board validation is tracked in `docs/BRINGUP.md`. Do not treat the
+hardware reference as public-alpha complete until the bring-up checklist has
+real serial logs, WAV samples, upload responses, and case-fit evidence.
+
 ![Plaud Note vs Waveshare ESP32-S3-LCD-1.54 size comparison](docs/assets/plaud-vs-waveshare-lcd154.png)
 
 Plaud is much thinner and more finished; the Waveshare board is cheaper,

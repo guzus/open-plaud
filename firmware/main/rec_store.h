@@ -12,6 +12,6 @@ esp_err_t rec_store_mark_sent(const char *path);           /* move a clip into /
 
 /* Upload pending clips oldest-first, moving each success into /sent. Stops on
  * the first upload failure (Wi-Fi is likely down — don't burn the boot on N
- * timeouts) and reports it via *out_upload_failed so the caller can skip
- * uploads for the rest of this boot. Returns the number of clips uploaded. */
+ * timeouts) and reports it via *out_upload_failed so the caller can leave the
+ * remaining clips queued for a later retry. Returns the number uploaded. */
 int rec_store_retry_pending(bool *out_upload_failed);

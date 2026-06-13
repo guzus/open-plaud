@@ -14,10 +14,12 @@
 - [~] ESP-IDF firmware for ESP32-S3-LCD-1.54 — builds clean on ESP-IDF v5.4.1
       (`esp_codec_dev` 2.0.0); flash + runtime validation pending board arrival
 - [~] Recorder loop implemented: hold-to-record (PLUS), numbered `rec_NNNN.wav`
-      clips, `/sdcard/sent` + next-boot upload retry queue — hardware-unvalidated
-- [~] Wi-Fi sync to `POST /v1/recordings` (implemented, not hardware-flashed yet)
+      clips, `/sdcard/sent`, boot retry, same-boot retry — hardware-unvalidated
+- [~] Wi-Fi sync to `POST /v1/recordings` (implemented, retry re-entry added,
+      not hardware-flashed yet)
 - [~] LCD/log status UI (build verified, not hardware-flashed yet)
 - [~] 3D-printable case for LCD-1.54 + battery (first-article STL exists; measure after board arrives)
+- [ ] First-board public-alpha evidence pack (`docs/BRINGUP.md`)
 
 ## v2 — local transcription (the deferred decision)
 The interface was already built for this. These are new providers, not rewrites.
