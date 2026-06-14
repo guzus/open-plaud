@@ -1,10 +1,10 @@
-# server-go — ingest + transcription server (Go, stdlib-only)
+# server-go — ingest + transcription + summarization (Go, stdlib-only)
 
 A minimal, device-compatible drop-in for the Python `../server`. It receives the
-recorder's WAV uploads, **transcribes them via Deepgram** (when
-`DEEPGRAM_API_KEY` is set), and exposes both the audio and the transcript.
-Summarization is still out of scope (that lives in `../server`, in Python). A
-cheap, single-binary cloud endpoint on Railway for the PoC.
+recorder's WAV uploads, **transcribes them via Deepgram** (when `DEEPGRAM_API_KEY`
+is set), **summarizes the transcript via Claude** (when `ANTHROPIC_API_KEY` is
+set), and serves both — plus a small web UI with an audio player and Markdown
+export. A cheap, single-binary cloud endpoint on Railway for the PoC.
 
 Live PoC: **https://ingest-production-4fd2.up.railway.app**
 
@@ -12,20 +12,22 @@ Live PoC: **https://ingest-production-4fd2.up.railway.app**
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET`  | `/healthz` | `{"status":"ok"}` |
+| `GET`  | `/healthz` | `{"status":"ok"}` (always open, even with auth on) |
 | `POST` | `/v1/recordings` | multipart field **`file`** → `200 {Recording}` |
 | `GET`  | `/v1/recordings` | list, newest first |
 | `GET`  | `/v1/recordings/{id}` | one recording |
 | `GET`  | `/v1/recordings/{id}/audio` | download the stored blob (Range-enabled) |
-| `GET`  | `/` | tiny HTML list for eyeballing uploads |
+| `GET`  | `/v1/recordings/{id}/export.md` | transcript + summary as Markdown |
+| `GET`  | `/` | HTML list of recordings |
+| `GET`  | `/rec/{id}` | recording detail: audio player, transcript, summary |
 
 `Recording` JSON matches the Python `RecordingResponse` field-for-field
 (`id, status, filename, size_bytes, created_at, transcript, summary, error`).
-`status` walks `received → transcribing → done` (or `failed`); `transcript` is
-`{text, language, segments}` once Deepgram returns; `summary` stays `null`. With
-no `DEEPGRAM_API_KEY` set, uploads stay `received` with a `null` transcript. The
-device only checks for a 2xx on `POST`, so this stays compatible with
-`firmware/main/net_upload.c`.
+`status` walks `received → transcribing → summarizing → done` (or `failed` if
+transcription fails); `transcript` is `{text, language, segments}` once Deepgram
+returns; `summary` is `{summary, action_items}` once Claude returns. Stages with
+no key configured are skipped. The device only checks for a 2xx on `POST`, so this
+stays compatible with `firmware/main/net_upload.c`.
 
 ## Run locally
 
@@ -39,8 +41,9 @@ curl -F "file=@sample.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
 Config (env): `PORT` (default 8000), `OP_STORAGE_DIR` (default `/data`),
 `OP_UPLOAD_MAX_BYTES` (default 200 MiB), `OP_AUTH_TOKEN` (default empty = open),
 `DEEPGRAM_API_KEY` (default empty = transcription off), `DEEPGRAM_MODEL`
-(default `nova-3`). No external dependencies, no database — each upload is a blob
-`{id}{ext}` + sidecar `{id}.json` in the storage dir.
+(default `nova-3`), `ANTHROPIC_API_KEY` (default empty = summarization off),
+`CLAUDE_MODEL` (default `claude-opus-4-8`). No external dependencies, no
+database — each upload is a blob `{id}{ext}` + sidecar `{id}.json` in the storage dir.
 
 ## Transcription (Deepgram)
 
@@ -57,6 +60,23 @@ the repo:
 ```bash
 railway variables --set "DEEPGRAM_API_KEY=<your-key>"   # redeploys with transcription on
 ```
+
+## Summarization (Claude)
+
+When `ANTHROPIC_API_KEY` is set, a transcript is summarized after transcription:
+status goes `summarizing`, the server calls the Anthropic Messages API
+(`claude-opus-4-8` by default — set `CLAUDE_MODEL=claude-haiku-4-5` to cut cost),
+and stores `{summary, action_items}`. A summary failure is **non-fatal** — the
+recording still finishes `done` with its transcript. The reply is parsed
+defensively (recovers JSON from markdown/prose; falls back to raw text).
+
+```bash
+railway variables --set "ANTHROPIC_API_KEY=<your-key>"   # redeploys with summarization on
+```
+
+> Cost note: `claude-opus-4-8` is the most capable (and priciest) model. For
+> routine meeting summaries, `CLAUDE_MODEL=claude-haiku-4-5` or
+> `claude-sonnet-4-6` is much cheaper.
 
 ## Security
 
@@ -76,6 +96,13 @@ line in `firmware/main/net_upload.c` (a Kconfig string + `esp_http_client_set_he
 ```c
 esp_http_client_set_header(client, "Authorization", "Bearer " CONFIG_OPEN_PLAUD_AUTH_TOKEN);
 ```
+
+**Browser access with auth on:** a browser can't send a bearer header, so visit
+`/?token=<token>` once — the server sets an HttpOnly cookie and all links, the
+detail page, and the `<audio>` element work for the rest of the session. (The
+token rides in the URL on that first request; for a real deployment prefer a
+proper session login.) To reopen for a quick demo, clear the variable:
+`railway variables --set "OP_AUTH_TOKEN="`.
 
 ## Deploy to Railway
 

@@ -22,6 +22,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -65,6 +66,18 @@ type Transcript struct {
 	Segments []any  `json:"segments"`
 }
 
+// ActionItem / Summary mirror the Python server's SummaryResponse shape.
+type ActionItem struct {
+	Text  string `json:"text"`
+	Owner string `json:"owner,omitempty"`
+	Due   string `json:"due,omitempty"`
+}
+
+type Summary struct {
+	Summary     string       `json:"summary"`
+	ActionItems []ActionItem `json:"action_items"`
+}
+
 // Recording is both the on-disk metadata and the API response shape. The fields
 // match the Python RecordingResponse field-for-field so the device poller and
 // any existing UI work unchanged. summary stays null (out of scope); transcript
@@ -78,7 +91,7 @@ type Recording struct {
 	ContentType string      `json:"content_type,omitempty"`
 	StoredName  string      `json:"stored_name,omitempty"`
 	Transcript  *Transcript `json:"transcript"`
-	Summary     any         `json:"summary"`
+	Summary     *Summary    `json:"summary"`
 	Error       any         `json:"error"`
 }
 
@@ -88,6 +101,8 @@ type server struct {
 	authToken     string // if non-empty, every route except /healthz needs "Authorization: Bearer <token>"
 	deepgramKey   string // if non-empty, uploads are transcribed via Deepgram
 	deepgramModel string
+	anthropicKey  string // if non-empty, transcripts are summarized via Claude
+	claudeModel   string
 }
 
 func main() {
@@ -98,18 +113,21 @@ func main() {
 		authToken:     os.Getenv("OP_AUTH_TOKEN"),
 		deepgramKey:   os.Getenv("DEEPGRAM_API_KEY"),
 		deepgramModel: getenv("DEEPGRAM_MODEL", "nova-3"),
+		anthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
+		// Default per the claude-api skill; override (e.g. claude-haiku-4-5) to cut cost.
+		claudeModel: getenv("CLAUDE_MODEL", "claude-opus-4-8"),
 	}
 	if err := os.MkdirAll(srv.storageDir, 0o755); err != nil {
 		log.Fatalf("cannot create storage dir %s: %v", srv.storageDir, err)
 	}
-	// Re-enqueue anything left mid-flight (a restart during transcription, or
-	// clips uploaded before the key was set). Background tasks don't survive a
-	// restart, so this is the recovery path.
-	if srv.deepgramKey != "" {
+	// Re-enqueue anything left mid-flight (a restart during processing, or clips
+	// uploaded before a key was set). Background tasks don't survive a restart,
+	// so this is the recovery path. process() figures out what's still needed.
+	if srv.deepgramKey != "" || srv.anthropicKey != "" {
 		if recs, err := srv.listMeta(); err == nil {
 			for _, rec := range recs {
-				if rec.Transcript == nil && (rec.Status == "received" || rec.Status == "transcribing") {
-					go srv.transcribe(rec)
+				if rec.Status != "done" && rec.Status != "failed" {
+					go srv.process(rec)
 				}
 			}
 		}
@@ -121,11 +139,13 @@ func main() {
 	mux.HandleFunc("GET /v1/recordings", srv.handleList)
 	mux.HandleFunc("GET /v1/recordings/{id}", srv.handleGet)
 	mux.HandleFunc("GET /v1/recordings/{id}/audio", srv.handleAudio)
+	mux.HandleFunc("GET /v1/recordings/{id}/export.md", srv.handleExport)
+	mux.HandleFunc("GET /rec/{id}", srv.handleDetail)
 	mux.HandleFunc("GET /", srv.handleIndex)
 
 	addr := ":" + port
-	log.Printf("open-plaud ingest listening on %s (storage=%s, max=%d bytes, auth=%v, deepgram=%v)",
-		addr, srv.storageDir, srv.maxBytes, srv.authToken != "", srv.deepgramKey != "")
+	log.Printf("open-plaud listening on %s (storage=%s, max=%d bytes, auth=%v, deepgram=%v, claude=%v)",
+		addr, srv.storageDir, srv.maxBytes, srv.authToken != "", srv.deepgramKey != "", srv.anthropicKey != "")
 	if err := http.ListenAndServe(addr, logging(srv.auth(mux))); err != nil {
 		log.Fatal(err)
 	}
@@ -136,16 +156,37 @@ func main() {
 // require "Authorization: Bearer <token>". The device sends it with one
 // esp_http_client_set_header call. /healthz stays open for Railway's checks.
 func (s *server) auth(next http.Handler) http.Handler {
+	match := func(c string) bool {
+		// constant-time compare avoids leaking the token via response timing
+		return c != "" && subtle.ConstantTimeCompare([]byte(c), []byte(s.authToken)) == 1
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authToken != "" && r.URL.Path != "/healthz" {
-			const prefix = "Bearer "
-			got := strings.TrimPrefix(r.Header.Get("Authorization"), prefix)
-			// constant-time compare avoids leaking the token via response timing
-			if got == r.Header.Get("Authorization") ||
-				subtle.ConstantTimeCompare([]byte(got), []byte(s.authToken)) != 1 {
-				httpError(w, http.StatusUnauthorized, "unauthorized")
-				return
+		if s.authToken == "" || r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Token may arrive three ways: the Authorization header (devices/curl),
+		// a ?token=  query param (first browser visit), or the op_token cookie
+		// (browser navigation after the first visit).
+		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		query := r.URL.Query().Get("token")
+		ok := match(bearer) || match(query)
+		if !ok {
+			if c, err := r.Cookie("op_token"); err == nil {
+				ok = match(c.Value)
 			}
+		}
+		if !ok {
+			httpError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		// On a valid ?token, set a cookie so links and the <audio> element work
+		// without repeating the token in every URL.
+		if match(query) {
+			http.SetCookie(w, &http.Cookie{
+				Name: "op_token", Value: s.authToken, Path: "/",
+				HttpOnly: true, SameSite: http.SameSiteLaxMode,
+			})
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -242,10 +283,11 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("received %s (%d bytes) as %s", rec.Filename, size, storedName)
-		// Transcribe in the background so the device's POST returns immediately;
-		// it polls GET for the transcript. Mirrors the Python server's BackgroundTask.
-		if s.deepgramKey != "" {
-			go s.transcribe(rec)
+		// Process (transcribe + summarize) in the background so the device's POST
+		// returns immediately; it polls GET for the result. Mirrors the Python
+		// server's BackgroundTask.
+		if s.deepgramKey != "" || s.anthropicKey != "" {
+			go s.process(rec)
 		}
 		writeJSON(w, http.StatusOK, rec)
 		return
@@ -303,32 +345,55 @@ func (s *server) handleAudio(w http.ResponseWriter, r *http.Request) {
 
 var dgClient = &http.Client{Timeout: 120 * time.Second}
 
-// transcribe runs Deepgram on one stored recording and persists the result.
-// Runs in a goroutine; status walks received -> transcribing -> done | failed.
-// Each writeMeta is atomic (tmp+rename), so a concurrent GET always reads a
-// complete record.
-func (s *server) transcribe(rec Recording) {
-	rec.Status = "transcribing"
-	if err := s.writeMeta(rec); err != nil {
-		log.Printf("transcribe %s: meta: %v", rec.ID, err)
-		return
+// process runs the pipeline for one stored recording and persists each step.
+// Runs in a goroutine; status walks received -> transcribing -> summarizing ->
+// done (or failed if transcription fails). It's resumable: it skips a stage
+// already complete, so the boot-time re-enqueue can finish interrupted work.
+// Each writeMeta is atomic (tmp+rename), so a concurrent GET reads a whole record.
+func (s *server) process(rec Recording) {
+	// 1. Transcribe (Deepgram).
+	if rec.Transcript == nil && s.deepgramKey != "" {
+		rec.Status = "transcribing"
+		if err := s.writeMeta(rec); err != nil {
+			log.Printf("process %s: meta: %v", rec.ID, err)
+			return
+		}
+		text, lang, err := s.deepgram(filepath.Join(s.storageDir, rec.StoredName), mediaType(rec))
+		if err != nil {
+			log.Printf("transcribe %s: %v", rec.ID, err)
+			rec.Status = "failed"
+			rec.Error = err.Error()
+			_ = s.writeMeta(rec)
+			return
+		}
+		rec.Transcript = &Transcript{Text: text, Language: lang, Segments: []any{}}
+		rec.Error = nil
+		log.Printf("transcribed %s (%d chars, lang=%q)", rec.ID, len(text), lang)
 	}
-	text, lang, err := s.deepgram(filepath.Join(s.storageDir, rec.StoredName), mediaType(rec))
-	if err != nil {
-		log.Printf("transcribe %s: %v", rec.ID, err)
-		rec.Status = "failed"
-		rec.Error = err.Error()
-		_ = s.writeMeta(rec)
-		return
+
+	// 2. Summarize (Claude). A summary failure is non-fatal — the transcript is
+	// still useful, so we finish as done without a summary rather than failing.
+	if rec.Summary == nil && s.anthropicKey != "" &&
+		rec.Transcript != nil && strings.TrimSpace(rec.Transcript.Text) != "" {
+		rec.Status = "summarizing"
+		if err := s.writeMeta(rec); err != nil {
+			log.Printf("process %s: meta: %v", rec.ID, err)
+			return
+		}
+		sum, err := s.claude(rec.Transcript.Text)
+		if err != nil {
+			log.Printf("summarize %s: %v", rec.ID, err)
+		} else {
+			rec.Summary = sum
+			log.Printf("summarized %s (%d action items)", rec.ID, len(sum.ActionItems))
+		}
 	}
-	rec.Transcript = &Transcript{Text: text, Language: lang, Segments: []any{}}
+
+	// 3. Done.
 	rec.Status = "done"
-	rec.Error = nil
 	if err := s.writeMeta(rec); err != nil {
-		log.Printf("transcribe %s: meta: %v", rec.ID, err)
-		return
+		log.Printf("process %s: meta: %v", rec.ID, err)
 	}
-	log.Printf("transcribed %s (%d chars, lang=%q)", rec.ID, len(text), lang)
 }
 
 // deepgram POSTs the audio to Deepgram's pre-recorded API and returns the
@@ -387,6 +452,86 @@ func (s *server) deepgram(blobPath, contentType string) (string, string, error) 
 	return ch.Alternatives[0].Transcript, ch.DetectedLanguage, nil
 }
 
+// ---- summarization (Claude) -------------------------------------------------
+
+var anthropicClient = &http.Client{Timeout: 120 * time.Second}
+
+// claude summarizes a transcript via the Anthropic Messages API and returns a
+// Summary. It asks for a strict JSON object and parses it defensively: if the
+// model wraps the JSON in prose or markdown, it still recovers the object, and
+// if parsing fails entirely it degrades to using the whole reply as the summary.
+func (s *server) claude(transcript string) (*Summary, error) {
+	const system = `You summarize voice-note and meeting transcripts. Reply with ONLY a single ` +
+		`minified JSON object — no markdown, no code fences, no preamble — matching exactly: ` +
+		`{"summary": string, "action_items": [{"text": string, "owner": string, "due": string}]}. ` +
+		`"summary" is a concise paragraph. "action_items" lists concrete follow-ups (use [] if none); ` +
+		`set "owner"/"due" to "" when unknown. Write the summary in the transcript's own language.`
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model":      s.claudeModel,
+		"max_tokens": 4096,
+		"system":     system,
+		"messages":   []map[string]any{{"role": "user", "content": transcript}},
+	})
+	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-api-key", s.anthropicKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := anthropicClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("anthropic status %d: %s", resp.StatusCode, truncate(string(raw), 300))
+	}
+
+	var ar struct {
+		StopReason string `json:"stop_reason"`
+		Content    []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &ar); err != nil {
+		return nil, fmt.Errorf("anthropic decode: %w", err)
+	}
+	if ar.StopReason == "refusal" {
+		return nil, fmt.Errorf("claude declined to summarize")
+	}
+	var text strings.Builder
+	for _, b := range ar.Content {
+		if b.Type == "text" {
+			text.WriteString(b.Text)
+		}
+	}
+
+	var sum Summary
+	if err := json.Unmarshal([]byte(extractJSON(text.String())), &sum); err != nil {
+		// Degrade gracefully rather than losing the model's work.
+		return &Summary{Summary: strings.TrimSpace(text.String()), ActionItems: []ActionItem{}}, nil
+	}
+	if sum.ActionItems == nil {
+		sum.ActionItems = []ActionItem{}
+	}
+	return &sum, nil
+}
+
+// extractJSON returns the first {...} span, tolerating prose/markdown around it.
+func extractJSON(s string) string {
+	i := strings.IndexByte(s, '{')
+	j := strings.LastIndexByte(s, '}')
+	if i >= 0 && j > i {
+		return s[i : j+1]
+	}
+	return s
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -416,15 +561,109 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 			if rec.Transcript != nil {
 				tx = rec.Transcript.Text
 			}
-			fmt.Fprintf(&b, `<tr><td class=muted>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><a href="/v1/recordings/%s/audio">download</a></td></tr>`,
+			fmt.Fprintf(&b, `<tr><td class=muted>%s</td><td><a href="/rec/%s">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td><a href="/v1/recordings/%s/audio">download</a></td></tr>`,
 				rec.CreatedAt.Format("2006-01-02 15:04:05"),
-				html.EscapeString(rec.Filename), humanBytes(rec.SizeBytes), html.EscapeString(rec.Status),
+				rec.ID, html.EscapeString(rec.Filename), humanBytes(rec.SizeBytes), html.EscapeString(rec.Status),
 				html.EscapeString(truncate(tx, 160)), rec.ID)
 		}
 		b.WriteString(`</table>`)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, b.String())
+}
+
+// handleDetail renders one recording: audio player, summary + action items, and
+// the full transcript. id is validated to be hex by readMeta.
+func (s *server) handleDetail(w http.ResponseWriter, r *http.Request) {
+	rec, ok := s.readMeta(r.PathValue("id"))
+	if !ok {
+		httpError(w, http.StatusNotFound, "recording not found")
+		return
+	}
+	var b strings.Builder
+	b.WriteString(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">`)
+	fmt.Fprintf(&b, `<title>%s — open-plaud</title>`, html.EscapeString(rec.Filename))
+	b.WriteString(`<style>body{font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#111}`)
+	b.WriteString(`h1{font-size:20px}h2{font-size:15px;margin-top:28px;color:#444}a{color:#0a58ca}.muted{color:#888;font-size:13px}`)
+	b.WriteString(`audio{width:100%;margin:8px 0}pre{white-space:pre-wrap;background:#f7f7f5;padding:12px;border-radius:6px}`)
+	b.WriteString(`ul{padding-left:20px}.tag{display:inline-block;padding:1px 8px;border-radius:10px;background:#eee;font-size:12px}</style>`)
+	b.WriteString(`<p><a href="/">← all recordings</a></p>`)
+	fmt.Fprintf(&b, `<h1>%s</h1>`, html.EscapeString(rec.Filename))
+	fmt.Fprintf(&b, `<p class=muted>%s · %s · <span class=tag>%s</span></p>`,
+		rec.CreatedAt.Format("2006-01-02 15:04:05"), humanBytes(rec.SizeBytes), html.EscapeString(rec.Status))
+	fmt.Fprintf(&b, `<audio controls preload=metadata src="/v1/recordings/%s/audio"></audio>`, rec.ID)
+
+	if rec.Summary != nil {
+		fmt.Fprintf(&b, `<h2>Summary</h2><p>%s</p>`, html.EscapeString(rec.Summary.Summary))
+		if len(rec.Summary.ActionItems) > 0 {
+			b.WriteString(`<h2>Action items</h2><ul>`)
+			for _, it := range rec.Summary.ActionItems {
+				fmt.Fprintf(&b, `<li>%s%s</li>`, html.EscapeString(it.Text), html.EscapeString(itemMeta(it)))
+			}
+			b.WriteString(`</ul>`)
+		}
+	}
+	switch {
+	case rec.Transcript != nil && rec.Transcript.Text != "":
+		lang := ""
+		if rec.Transcript.Language != "" {
+			lang = " (" + html.EscapeString(rec.Transcript.Language) + ")"
+		}
+		fmt.Fprintf(&b, `<h2>Transcript%s</h2><pre>%s</pre>`, lang, html.EscapeString(rec.Transcript.Text))
+	case rec.Status == "done":
+		b.WriteString(`<h2>Transcript</h2><p class=muted>No speech detected.</p>`)
+	default:
+		b.WriteString(`<h2>Transcript</h2><p class=muted>Not available yet — check back after processing.</p>`)
+	}
+	fmt.Fprintf(&b, `<p style="margin-top:24px"><a href="/v1/recordings/%s/export.md">Export Markdown</a> · <a href="/v1/recordings/%s/audio">Download audio</a></p>`, rec.ID, rec.ID)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, b.String())
+}
+
+func (s *server) handleExport(w http.ResponseWriter, r *http.Request) {
+	rec, ok := s.readMeta(r.PathValue("id"))
+	if !ok {
+		httpError(w, http.StatusNotFound, "recording not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", rec.ID+".md"))
+	_, _ = io.WriteString(w, renderMarkdown(rec))
+}
+
+func itemMeta(it ActionItem) string {
+	var parts []string
+	if it.Owner != "" {
+		parts = append(parts, "owner: "+it.Owner)
+	}
+	if it.Due != "" {
+		parts = append(parts, "due: "+it.Due)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+func renderMarkdown(rec Recording) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", rec.Filename)
+	fmt.Fprintf(&b, "- **Status:** %s\n", rec.Status)
+	fmt.Fprintf(&b, "- **Created:** %s\n", rec.CreatedAt.Format(time.RFC3339))
+	if rec.Summary != nil {
+		fmt.Fprintf(&b, "\n## Summary\n\n%s\n", rec.Summary.Summary)
+		if len(rec.Summary.ActionItems) > 0 {
+			b.WriteString("\n## Action items\n\n")
+			for _, it := range rec.Summary.ActionItems {
+				fmt.Fprintf(&b, "- [ ] %s%s\n", it.Text, itemMeta(it))
+			}
+		}
+	}
+	if rec.Transcript != nil && rec.Transcript.Text != "" {
+		fmt.Fprintf(&b, "\n## Transcript\n\n%s\n", rec.Transcript.Text)
+	}
+	return b.String()
 }
 
 // ---- storage ----------------------------------------------------------------
