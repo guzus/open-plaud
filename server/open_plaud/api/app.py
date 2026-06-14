@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -30,6 +31,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
 from open_plaud.config import Config
+from open_plaud.hooker import HookerDispatcher
 from open_plaud.pipeline.orchestrator import Pipeline
 from open_plaud.store import RecordingStore
 from open_plaud.types import AudioRef, JobStatus, Recording, Summary
@@ -42,6 +44,7 @@ _SUFFIX_MEDIA_TYPES = {
     ".m4a": "audio/mp4",
     ".mp3": "audio/mpeg",
 }
+log = logging.getLogger("open_plaud.api")
 
 
 class TranscriptSegmentResponse(BaseModel):
@@ -89,6 +92,7 @@ app = FastAPI(title="open-plaud API", version="0.0.1")
 config = Config()
 store = RecordingStore(config)
 pipeline = Pipeline(config)
+hooker_dispatcher = HookerDispatcher(config.hooker)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
@@ -176,6 +180,16 @@ async def _process(recording_id: str) -> None:
     rec.status = JobStatus.TRANSCRIBING
     store.update(rec)
     await pipeline.run(rec, summarize=True)
+    if rec.status == JobStatus.DONE:
+        try:
+            result = await hooker_dispatcher.dispatch(rec)
+            if result.published:
+                log.info("dispatched recording %s to Hooker topic %s", rec.id, config.hooker.topic)
+            elif result.reason != "disabled":
+                log.info("skipped Hooker dispatch for recording %s: %s", rec.id, result.reason)
+        except Exception as exc:  # noqa: BLE001 - keep audio/transcript usable
+            log.exception("Hooker dispatch failed for recording %s", rec.id)
+            rec.error = f"Hooker dispatch failed: {type(exc).__name__}: {exc}"
     store.update(rec)
 
 

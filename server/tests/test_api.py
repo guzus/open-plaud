@@ -42,6 +42,20 @@ class _StubSummarizer:
         )
 
 
+class _StubHookerDispatcher:
+    def __init__(self) -> None:
+        self.recordings: list[object] = []
+
+    async def dispatch(self, rec: object) -> object:
+        self.recordings.append(rec)
+        return object()
+
+
+class _FailingHookerDispatcher:
+    async def dispatch(self, rec: object) -> object:
+        raise RuntimeError("hooker down")
+
+
 def _use_stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     # _process reads the module-level `pipeline`, so patching its stages here makes
     # the real upload->pipeline->persist->response path run with non-empty content.
@@ -263,6 +277,42 @@ def test_full_pipeline_produces_transcript_and_summary(
     detail = client.get(f"/rec/{rid}").text
     assert "A concise summary." in detail
     assert "email Bob" in detail
+
+
+def test_full_pipeline_dispatches_completed_transcript_to_hooker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_stub_pipeline(monkeypatch)
+    from open_plaud.api import app as app_module
+
+    dispatcher = _StubHookerDispatcher()
+    monkeypatch.setattr(app_module, "hooker_dispatcher", dispatcher)
+
+    client = TestClient(app)
+    rid = _post_wav(client, name="voice-command.wav")
+
+    assert len(dispatcher.recordings) == 1
+    dispatched = dispatcher.recordings[0]
+    assert getattr(dispatched, "id") == rid
+    assert getattr(dispatched, "transcript").text == "hello world"
+    assert getattr(dispatched, "summary").summary == "A concise summary."
+
+
+def test_hooker_dispatch_failure_is_visible_without_losing_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_stub_pipeline(monkeypatch)
+    from open_plaud.api import app as app_module
+
+    monkeypatch.setattr(app_module, "hooker_dispatcher", _FailingHookerDispatcher())
+
+    client = TestClient(app)
+    rid = _post_wav(client, name="voice-command.wav")
+
+    got = client.get(f"/v1/recordings/{rid}").json()
+    assert got["status"] == "done"
+    assert got["transcript"]["text"] == "hello world"
+    assert got["error"] == "Hooker dispatch failed: RuntimeError: hooker down"
 
 
 def test_reprocess_reruns_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:

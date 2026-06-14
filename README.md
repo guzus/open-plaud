@@ -106,6 +106,26 @@ OP_OLLAMA_MODEL=qwen2.5:7b                  # or any model installed in Ollama
 See `server/.env.example` for the `whisper_cpp`, Ollama, and diarization
 settings.
 
+## Vibecoding device mode
+
+`open-plaud` can also act as a physical voice prompt device for a Hooker agent
+bridge. After a recording is transcribed, the server can publish the transcript
+as a structured prompt to a Hooker topic such as `agent_in`; Hooker then routes
+that message through `hooker-agent-bridge` to OpenCode or Pi and publishes the
+agent response back to `agent_out`.
+
+Enable it with:
+
+```bash
+OP_HOOKER__ENABLED=true
+OP_HOOKER__URL=https://your-hooker.example
+OP_HOOKER__API_KEY=hk_...
+OP_HOOKER__TOPIC=agent_in
+```
+
+See `docs/VIBECODING.md` for the full contract, failure behavior, and Hooker
+setup.
+
 `uv` reads the pinned interpreter from `.python-version` (installing it if missing).
 Dev tools (pytest, ruff, mypy) come with `uv sync` — run them via `uv run pytest`,
 `uv run ruff check .`, `uv run mypy .`.
