@@ -120,13 +120,18 @@ func main() {
 	if err := os.MkdirAll(srv.storageDir, 0o755); err != nil {
 		log.Fatalf("cannot create storage dir %s: %v", srv.storageDir, err)
 	}
-	// Re-enqueue anything left mid-flight (a restart during processing, or clips
-	// uploaded before a key was set). Background tasks don't survive a restart,
-	// so this is the recovery path. process() figures out what's still needed.
+	// Re-enqueue work on boot. Two cases: (1) anything left mid-flight by a
+	// restart, and (2) backfill — when a Claude key is newly set, summarize
+	// transcripts that already finished `done` without a summary. process()
+	// skips stages already complete, so it does the right thing for both.
 	if srv.deepgramKey != "" || srv.anthropicKey != "" {
 		if recs, err := srv.listMeta(); err == nil {
 			for _, rec := range recs {
-				if rec.Status != "done" && rec.Status != "failed" {
+				pending := rec.Status != "done" && rec.Status != "failed"
+				backfill := srv.anthropicKey != "" && rec.Status == "done" &&
+					rec.Summary == nil && rec.Transcript != nil &&
+					strings.TrimSpace(rec.Transcript.Text) != ""
+				if pending || backfill {
 					go srv.process(rec)
 				}
 			}
@@ -181,12 +186,27 @@ func (s *server) auth(next http.Handler) http.Handler {
 			return
 		}
 		// On a valid ?token, set a cookie so links and the <audio> element work
-		// without repeating the token in every URL.
+		// without repeating the token in every URL, then (for GETs) redirect to
+		// the same path with ?token stripped — so the secret doesn't linger in
+		// the address bar, history, logs, or a Referer header.
 		if match(query) {
+			secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+			w.Header().Set("Cache-Control", "no-store") // don't let a cache keep the Set-Cookie
 			http.SetCookie(w, &http.Cookie{
 				Name: "op_token", Value: s.authToken, Path: "/",
-				HttpOnly: true, SameSite: http.SameSiteLaxMode,
+				HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
+				MaxAge: 86400,
 			})
+			if r.Method == http.MethodGet {
+				q := r.URL.Query()
+				q.Del("token")
+				target := r.URL.Path
+				if rq := q.Encode(); rq != "" {
+					target += "?" + rq
+				}
+				http.Redirect(w, r, target, http.StatusSeeOther)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
