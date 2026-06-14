@@ -36,7 +36,16 @@ menu "open-plaud"
         default "http://192.168.4.2:8000"
         help
             Base URL for the open-plaud server, without a trailing slash.
-            Example: http://192.168.1.50:8000
+            Example: http://192.168.1.50:8000 (LAN) or
+            https://ingest-production-4fd2.up.railway.app (Railway, needs TLS).
+
+    config OPEN_PLAUD_AUTH_TOKEN
+        string "Server auth bearer token"
+        default ""
+        help
+            Optional shared secret. When set, the device sends
+            "Authorization: Bearer <token>" with every upload, matching the
+            server's OP_AUTH_TOKEN. Leave empty for an open server.
 
     config OPEN_PLAUD_WIFI_MAX_RETRIES
         int "Wi-Fi reconnect attempts"

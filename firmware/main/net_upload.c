@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_check.h"
+#include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -242,6 +243,9 @@ esp_err_t net_upload_wav(const char *path)
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = CONFIG_OPEN_PLAUD_UPLOAD_TIMEOUT_MS,
+        // Verify TLS against the bundled root CAs so an https:// server URL
+        // (e.g. Railway) works. Ignored for plain http:// (LAN) targets.
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
@@ -252,6 +256,16 @@ esp_err_t net_upload_wav(const char *path)
     char content_type[96];
     snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
     esp_http_client_set_header(client, "Content-Type", content_type);
+
+    // Optional shared-secret auth: matches the server's OP_AUTH_TOKEN. Empty by
+    // default (open server); set OPEN_PLAUD_AUTH_TOKEN in menuconfig to enable.
+    if (strlen(CONFIG_OPEN_PLAUD_AUTH_TOKEN) > 0) {
+        char auth[160];
+        int auth_len = snprintf(auth, sizeof(auth), "Bearer %s", CONFIG_OPEN_PLAUD_AUTH_TOKEN);
+        if (auth_len > 0 && auth_len < (int)sizeof(auth)) {
+            esp_http_client_set_header(client, "Authorization", auth);
+        }
+    }
 
     int64_t total_len = (int64_t)head_len + file_size + tail_len;
     if (total_len > INT_MAX) {
