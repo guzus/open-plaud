@@ -23,6 +23,17 @@ htmlcov/
 
 # SwiftPM build artifacts
 mobile/ios/.build/
+mac-client/.build/
+mac-client/.swiftpm/
+mac-client/Package.resolved
+
+# Xcode / macOS app build artifacts
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Mac client local sync state (machine-local data, not source)
+mac-client/sync-state.json
 
 # Audio / recordings (local data, not source)
 *.wav

@@ -1,0 +1,22 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+xcuserdata/
+
+# Local config / secrets (token lives in Keychain at runtime — never a file)
+*.local
+.env
+.env.*
+
+# Local sync state (machine-local data, not source)
+sync-state.json
+
+# macOS
+.DS_Store
