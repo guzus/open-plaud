@@ -99,10 +99,10 @@ type server struct {
 	storageDir    string
 	maxBytes      int64
 	authToken     string // if non-empty, every route except /healthz needs "Authorization: Bearer <token>"
-	deepgramKey   string // if non-empty, uploads are transcribed via Deepgram
-	deepgramModel string
-	anthropicKey  string // if non-empty, transcripts are summarized via Claude
-	claudeModel   string
+	deepgramKey    string // if non-empty, uploads are transcribed via Deepgram
+	deepgramModel  string
+	fireworksKey   string // if non-empty, transcripts are summarized via Fireworks (Kimi)
+	fireworksModel string
 }
 
 func main() {
@@ -111,11 +111,10 @@ func main() {
 		storageDir:    getenv("OP_STORAGE_DIR", "/data"),
 		maxBytes:      getenvInt64("OP_UPLOAD_MAX_BYTES", 200<<20), // 200 MiB (~50 min of 16k stereo)
 		authToken:     os.Getenv("OP_AUTH_TOKEN"),
-		deepgramKey:   os.Getenv("DEEPGRAM_API_KEY"),
-		deepgramModel: getenv("DEEPGRAM_MODEL", "nova-3"),
-		anthropicKey:  os.Getenv("ANTHROPIC_API_KEY"),
-		// Default per the claude-api skill; override (e.g. claude-haiku-4-5) to cut cost.
-		claudeModel: getenv("CLAUDE_MODEL", "claude-opus-4-8"),
+		deepgramKey:    os.Getenv("DEEPGRAM_API_KEY"),
+		deepgramModel:  getenv("DEEPGRAM_MODEL", "nova-3"),
+		fireworksKey:   os.Getenv("FIREWORKS_API_KEY"),
+		fireworksModel: getenv("FIREWORKS_MODEL", "accounts/fireworks/models/kimi-k2p7-code"),
 	}
 	if err := os.MkdirAll(srv.storageDir, 0o755); err != nil {
 		log.Fatalf("cannot create storage dir %s: %v", srv.storageDir, err)
@@ -124,11 +123,11 @@ func main() {
 	// restart, and (2) backfill — when a Claude key is newly set, summarize
 	// transcripts that already finished `done` without a summary. process()
 	// skips stages already complete, so it does the right thing for both.
-	if srv.deepgramKey != "" || srv.anthropicKey != "" {
+	if srv.deepgramKey != "" || srv.fireworksKey != "" {
 		if recs, err := srv.listMeta(); err == nil {
 			for _, rec := range recs {
 				pending := rec.Status != "done" && rec.Status != "failed"
-				backfill := srv.anthropicKey != "" && rec.Status == "done" &&
+				backfill := srv.fireworksKey != "" && rec.Status == "done" &&
 					rec.Summary == nil && rec.Transcript != nil &&
 					strings.TrimSpace(rec.Transcript.Text) != ""
 				if pending || backfill {
@@ -149,8 +148,8 @@ func main() {
 	mux.HandleFunc("GET /", srv.handleIndex)
 
 	addr := ":" + port
-	log.Printf("open-plaud listening on %s (storage=%s, max=%d bytes, auth=%v, deepgram=%v, claude=%v)",
-		addr, srv.storageDir, srv.maxBytes, srv.authToken != "", srv.deepgramKey != "", srv.anthropicKey != "")
+	log.Printf("open-plaud listening on %s (storage=%s, max=%d bytes, auth=%v, deepgram=%v, summarize=%v)",
+		addr, srv.storageDir, srv.maxBytes, srv.authToken != "", srv.deepgramKey != "", srv.fireworksKey != "")
 	if err := http.ListenAndServe(addr, logging(srv.auth(mux))); err != nil {
 		log.Fatal(err)
 	}
@@ -306,7 +305,7 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		// Process (transcribe + summarize) in the background so the device's POST
 		// returns immediately; it polls GET for the result. Mirrors the Python
 		// server's BackgroundTask.
-		if s.deepgramKey != "" || s.anthropicKey != "" {
+		if s.deepgramKey != "" || s.fireworksKey != "" {
 			go s.process(rec)
 		}
 		writeJSON(w, http.StatusOK, rec)
@@ -393,14 +392,14 @@ func (s *server) process(rec Recording) {
 
 	// 2. Summarize (Claude). A summary failure is non-fatal — the transcript is
 	// still useful, so we finish as done without a summary rather than failing.
-	if rec.Summary == nil && s.anthropicKey != "" &&
+	if rec.Summary == nil && s.fireworksKey != "" &&
 		rec.Transcript != nil && strings.TrimSpace(rec.Transcript.Text) != "" {
 		rec.Status = "summarizing"
 		if err := s.writeMeta(rec); err != nil {
 			log.Printf("process %s: meta: %v", rec.ID, err)
 			return
 		}
-		sum, err := s.claude(rec.Transcript.Text)
+		sum, err := s.summarize(rec.Transcript.Text)
 		if err != nil {
 			log.Printf("summarize %s: %v", rec.ID, err)
 		} else {
@@ -472,69 +471,66 @@ func (s *server) deepgram(blobPath, contentType string) (string, string, error) 
 	return ch.Alternatives[0].Transcript, ch.DetectedLanguage, nil
 }
 
-// ---- summarization (Claude) -------------------------------------------------
+// ---- summarization (Fireworks / Kimi) ---------------------------------------
 
-var anthropicClient = &http.Client{Timeout: 120 * time.Second}
+var fireworksClient = &http.Client{Timeout: 120 * time.Second}
 
-// claude summarizes a transcript via the Anthropic Messages API and returns a
-// Summary. It asks for a strict JSON object and parses it defensively: if the
-// model wraps the JSON in prose or markdown, it still recovers the object, and
-// if parsing fails entirely it degrades to using the whole reply as the summary.
-func (s *server) claude(transcript string) (*Summary, error) {
-	const system = `You summarize voice-note and meeting transcripts. Reply with ONLY a single ` +
-		`minified JSON object — no markdown, no code fences, no preamble — matching exactly: ` +
+// summarize sends a transcript to the Fireworks chat-completions API (OpenAI-
+// compatible) and returns a Summary. response_format json_object forces the
+// model to emit a clean JSON object (Kimi otherwise prepends reasoning); we
+// still parse defensively and degrade to raw text if needed.
+func (s *server) summarize(transcript string) (*Summary, error) {
+	const system = `You summarize voice-note and meeting transcripts. Output ONLY a JSON object: ` +
 		`{"summary": string, "action_items": [{"text": string, "owner": string, "due": string}]}. ` +
-		`"summary" is a concise paragraph. "action_items" lists concrete follow-ups (use [] if none); ` +
+		`"summary" is a concise paragraph. "action_items" are concrete follow-ups (use [] if none); ` +
 		`set "owner"/"due" to "" when unknown. Write the summary in the transcript's own language.`
 
 	reqBody, _ := json.Marshal(map[string]any{
-		"model":      s.claudeModel,
-		"max_tokens": 4096,
-		"system":     system,
-		"messages":   []map[string]any{{"role": "user", "content": transcript}},
+		"model":           s.fireworksModel,
+		"max_tokens":      2048,
+		"response_format": map[string]any{"type": "json_object"},
+		"messages": []map[string]any{
+			{"role": "system", "content": system},
+			{"role": "user", "content": transcript},
+		},
 	})
-	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", bytes.NewReader(reqBody))
+	req, err := http.NewRequest(http.MethodPost,
+		"https://api.fireworks.ai/inference/v1/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-api-key", s.anthropicKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("authorization", "Bearer "+s.fireworksKey)
 
-	resp, err := anthropicClient.Do(req)
+	resp, err := fireworksClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("anthropic status %d: %s", resp.StatusCode, truncate(string(raw), 300))
+		return nil, fmt.Errorf("fireworks status %d: %s", resp.StatusCode, truncate(string(raw), 300))
 	}
 
-	var ar struct {
-		StopReason string `json:"stop_reason"`
-		Content    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
+	var fr struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
-	if err := json.Unmarshal(raw, &ar); err != nil {
-		return nil, fmt.Errorf("anthropic decode: %w", err)
+	if err := json.Unmarshal(raw, &fr); err != nil {
+		return nil, fmt.Errorf("fireworks decode: %w", err)
 	}
-	if ar.StopReason == "refusal" {
-		return nil, fmt.Errorf("claude declined to summarize")
+	if len(fr.Choices) == 0 {
+		return nil, fmt.Errorf("fireworks: empty choices")
 	}
-	var text strings.Builder
-	for _, b := range ar.Content {
-		if b.Type == "text" {
-			text.WriteString(b.Text)
-		}
-	}
+	content := fr.Choices[0].Message.Content
 
 	var sum Summary
-	if err := json.Unmarshal([]byte(extractJSON(text.String())), &sum); err != nil {
+	if err := json.Unmarshal([]byte(extractJSON(content)), &sum); err != nil {
 		// Degrade gracefully rather than losing the model's work.
-		return &Summary{Summary: strings.TrimSpace(text.String()), ActionItems: []ActionItem{}}, nil
+		return &Summary{Summary: strings.TrimSpace(content), ActionItems: []ActionItem{}}, nil
 	}
 	if sum.ActionItems == nil {
 		sum.ActionItems = []ActionItem{}

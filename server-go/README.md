@@ -2,8 +2,8 @@
 
 A minimal, device-compatible drop-in for the Python `../server`. It receives the
 recorder's WAV uploads, **transcribes them via Deepgram** (when `DEEPGRAM_API_KEY`
-is set), **summarizes the transcript via Claude** (when `ANTHROPIC_API_KEY` is
-set), and serves both — plus a small web UI with an audio player and Markdown
+is set), **summarizes the transcript via Fireworks (Kimi)** (when
+`FIREWORKS_API_KEY` is set), and serves both — plus a small web UI with an audio player and Markdown
 export. A cheap, single-binary cloud endpoint on Railway for the PoC.
 
 Live PoC: **https://ingest-production-4fd2.up.railway.app**
@@ -25,7 +25,7 @@ Live PoC: **https://ingest-production-4fd2.up.railway.app**
 (`id, status, filename, size_bytes, created_at, transcript, summary, error`).
 `status` walks `received → transcribing → summarizing → done` (or `failed` if
 transcription fails); `transcript` is `{text, language, segments}` once Deepgram
-returns; `summary` is `{summary, action_items}` once Claude returns. Stages with
+returns; `summary` is `{summary, action_items}` once the summarizer returns. Stages with
 no key configured are skipped. The device only checks for a 2xx on `POST`, so this
 stays compatible with `firmware/main/net_upload.c`.
 
@@ -41,8 +41,8 @@ curl -F "file=@sample.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
 Config (env): `PORT` (default 8000), `OP_STORAGE_DIR` (default `/data`),
 `OP_UPLOAD_MAX_BYTES` (default 200 MiB), `OP_AUTH_TOKEN` (default empty = open),
 `DEEPGRAM_API_KEY` (default empty = transcription off), `DEEPGRAM_MODEL`
-(default `nova-3`), `ANTHROPIC_API_KEY` (default empty = summarization off),
-`CLAUDE_MODEL` (default `claude-opus-4-8`). No external dependencies, no
+(default `nova-3`), `FIREWORKS_API_KEY` (default empty = summarization off),
+`FIREWORKS_MODEL` (default `accounts/fireworks/models/kimi-k2p7-code`). No external dependencies, no
 database — each upload is a blob `{id}{ext}` + sidecar `{id}.json` in the storage dir.
 
 ## Transcription (Deepgram)
@@ -61,22 +61,23 @@ the repo:
 railway variables --set "DEEPGRAM_API_KEY=<your-key>"   # redeploys with transcription on
 ```
 
-## Summarization (Claude)
+## Summarization (Fireworks / Kimi)
 
-When `ANTHROPIC_API_KEY` is set, a transcript is summarized after transcription:
-status goes `summarizing`, the server calls the Anthropic Messages API
-(`claude-opus-4-8` by default — set `CLAUDE_MODEL=claude-haiku-4-5` to cut cost),
-and stores `{summary, action_items}`. A summary failure is **non-fatal** — the
-recording still finishes `done` with its transcript. The reply is parsed
-defensively (recovers JSON from markdown/prose; falls back to raw text).
+When `FIREWORKS_API_KEY` is set, a transcript is summarized after transcription:
+status goes `summarizing`, the server calls the Fireworks chat-completions API
+(OpenAI-compatible, model `accounts/fireworks/models/kimi-k2p7-code` by default —
+override with `FIREWORKS_MODEL`) with `response_format: json_object`, and stores
+`{summary, action_items}`. A summary failure is **non-fatal** — the recording
+still finishes `done` with its transcript. The reply is parsed defensively
+(recovers JSON even if the model adds prose; falls back to raw text).
 
 ```bash
-railway variables --set "ANTHROPIC_API_KEY=<your-key>"   # redeploys with summarization on
+railway variables --set "FIREWORKS_API_KEY=<your-key>"   # redeploys with summarization on
+# optional: railway variables --set "FIREWORKS_MODEL=accounts/fireworks/models/kimi-k2p6"
 ```
 
-> Cost note: `claude-opus-4-8` is the most capable (and priciest) model. For
-> routine meeting summaries, `CLAUDE_MODEL=claude-haiku-4-5` or
-> `claude-sonnet-4-6` is much cheaper.
+Enabling the key backfills existing transcripts on the next boot (the startup
+re-enqueue summarizes any `done` recording that has a transcript but no summary).
 
 ## Security
 
