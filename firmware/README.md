@@ -69,7 +69,7 @@ clears the backlog. A held button auto-stops after
 | `main/wav.c` | streaming 16-bit PCM WAV writer |
 | `main/rec_store.c` | clip numbering (`rec_NNNN.wav`, never reused), `/sdcard/sent/` move, boot-time retry queue |
 | `main/net_upload.c` | Wi-Fi STA + multipart upload to the server |
-| `main/status.c` | LCD or RGB LED status states (boot, ready, recording, syncing, done, error) |
+| `main/status.c` | Device UI: ST7789 LCD status screen on Waveshare, RGB LED states on Rev A |
 | `main/app_main.c` | orchestration: mount → retry pending → hold-to-record loop → upload |
 | `sdkconfig.defaults` | 16 MB flash, octal PSRAM, USB-JTAG console, custom partitions |
 | `sdkconfig.rev_a.defaults` | custom PCB Rev A compile profile |
@@ -147,7 +147,7 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
 - [x] Make `wifi_connect` re-enterable so uploads can retry within a boot
       instead of latching off until reboot.
-- [x] LCD/log status UI via ST7789/RGB state colors.
+- [x] LCD/log status UI via ST7789 screen states and RGB status colors.
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 
 ## Sources
