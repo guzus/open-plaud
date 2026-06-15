@@ -60,6 +60,24 @@ static unsigned scan_max_num(const char *dir)
     return max;
 }
 
+int rec_store_pending_count(void)
+{
+    DIR *d = opendir(SDCARD_MOUNT_POINT);
+    if (!d) {
+        return 0;
+    }
+    int n = 0;
+    unsigned num;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (parse_rec_name(ent->d_name, &num)) {
+            n++;
+        }
+    }
+    closedir(d);
+    return n;
+}
+
 esp_err_t rec_store_init(void)
 {
     if (mkdir(SENT_DIR, 0775) != 0 && errno != EEXIST) {
@@ -99,7 +117,8 @@ esp_err_t rec_store_mark_sent(const char *path)
     return ESP_OK;
 }
 
-int rec_store_retry_pending(bool *out_upload_failed)
+int rec_store_retry_pending(bool *out_upload_failed,
+                            rec_store_progress_fn progress, void *ctx)
 {
     if (out_upload_failed) *out_upload_failed = false;
 
@@ -159,6 +178,9 @@ int rec_store_retry_pending(bool *out_upload_failed)
                      path, SENT_DIR);
         }
         uploaded++;
+        if (progress) {
+            progress(uploaded, (int)count, ctx);
+        }
     }
     return uploaded;
 }

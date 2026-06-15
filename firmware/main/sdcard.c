@@ -58,3 +58,22 @@ void sdcard_unmount(void)
         s_card = NULL;
     }
 }
+
+esp_err_t sdcard_usage(uint64_t *out_used, uint64_t *out_total)
+{
+    if (!s_card) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint64_t total = 0, free_bytes = 0;
+    esp_err_t err = esp_vfs_fat_info(SDCARD_MOUNT_POINT, &total, &free_bytes);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (out_total) {
+        *out_total = total;
+    }
+    if (out_used) {
+        *out_used = (total >= free_bytes) ? total - free_bytes : 0;
+    }
+    return ESP_OK;
+}
