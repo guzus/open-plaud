@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>open-plaud — 3-button UX prototype</title>
+<style>
+  :root{ --bg:#0b0b10; --panel:#15151d; --ink:#e8e8ef; --muted:#8a8a99;
+         --green:#39d98a; --pink:#ff4fa3; --red:#ff5a5a; --amber:#ffb74d; --blue:#5ab0ff; --line:#262633; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+  h1{font-size:22px;margin:0 0 4px} h2{font-size:15px;color:var(--muted);font-weight:600;margin:34px 0 14px;text-transform:uppercase;letter-spacing:.06em}
+  .sub{color:var(--muted);margin:0 0 8px}
+  .row{display:flex;flex-wrap:wrap;gap:22px}
+  /* device = 3 buttons on top edge + 240x240 screen */
+  .device{width:248px}
+  .btns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:0 6px 6px}
+  .btn{height:16px;border-radius:0 0 9px 9px;background:#cfcfd6;position:relative}
+  .btn::after{content:attr(data-b);position:absolute;top:-17px;left:0;right:0;text-align:center;font-size:10px;color:var(--muted)}
+  .screen{width:240px;height:240px;background:#06060c;border:6px solid #d7d7dd;border-radius:14px;
+          padding:10px 12px;display:flex;flex-direction:column;overflow:hidden;position:relative}
+  /* on-screen button hint row, aligned to the 3 physical buttons */
+  .hints{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:11px;font-weight:700;letter-spacing:.02em}
+  .hint{text-align:center;padding:3px 2px;border-radius:6px;background:#14141c;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hint.rec{color:var(--pink);background:#2a1020}
+  .hint.stop{color:var(--red);background:#2a1212}
+  .hint.sync{color:var(--blue);background:#0f1c2a}
+  .hint.on{color:var(--ink)}
+  .hint.off{opacity:.28}
+  .wordmark{font-size:10px;letter-spacing:.22em;color:var(--green);text-align:center;margin:7px 0 0}
+  .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center}
+  .state{font-size:30px;font-weight:800;letter-spacing:.02em}
+  .state.ready{color:var(--pink)} .state.rec{color:var(--red)} .state.sync{color:var(--blue)}
+  .state.done{color:var(--green)} .state.off{color:var(--amber)}
+  .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums}
+  .meter{width:170px;height:8px;border-radius:4px;background:#1b1b25;overflow:hidden}
+  .meter>i{display:block;height:100%;background:linear-gradient(90deg,var(--green),var(--amber),var(--red))}
+  .prog{width:170px;height:8px;border-radius:4px;background:#1b1b25;overflow:hidden}
+  .prog>i{display:block;height:100%;background:var(--blue)}
+  .foot{font-size:11px;color:var(--muted);text-align:center;border-top:1px solid var(--line);padding-top:6px}
+  .cap{font-size:12px;color:var(--muted);text-align:center;margin:8px 0 0}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-right:4px}
+  /* mac client */
+  .mac{width:520px;max-width:100%;background:#1c1c22;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .mac .bar{background:#2a2a32;padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:13px}
+  .traffic{display:flex;gap:6px} .traffic i{width:11px;height:11px;border-radius:50%}
+  .mac .body{padding:14px 16px}
+  .clip{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}
+  .pill.q{background:#2a2412;color:var(--amber)} .pill.s{background:#10241a;color:var(--green)}
+  .macbtn{background:var(--blue);color:#04121f;border:none;border-radius:8px;padding:9px 14px;font-weight:700;font-size:13px;cursor:default;margin-top:12px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:10px}
+  .panel b{color:var(--ink)}
+  table.map{border-collapse:collapse;width:100%;font-size:14px;margin-top:6px}
+  table.map td,table.map th{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  table.map th{color:var(--muted);font-weight:600;background:#14141c}
+  .q{background:#171520;border-left:3px solid var(--pink);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0}
+  code{background:#000;padding:1px 5px;border-radius:4px;color:var(--green);font-size:13px}
+  .note{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>open-plaud — 3-button UX prototype</h1>
+  <p class="sub">Buttons sit on the <b>top edge</b>, so each button's label is shown along the <b>top of the screen</b>, right under the physical button. Labels are context-sensitive (they change per state).</p>
+
+  <h2>Proposed button map</h2>
+  <table class="map">
+    <tr><th>Physical (top edge)</th><th>Idle / Ready</th><th>While recording</th><th>While syncing</th></tr>
+    <tr><td><b>Left</b></td><td>⏻ Power (hold = sleep)</td><td>✕ Cancel (discard)</td><td>—</td></tr>
+    <tr><td><b>Middle</b></td><td>↻ Sync</td><td>—</td><td>✕ Cancel</td></tr>
+    <tr><td><b>Right</b> (the one used today)</td><td>● Record</td><td>■ Stop</td><td>—</td></tr>
+  </table>
+  <p class="note">Record is now a <b>toggle</b>: press Right to start, press Right again to stop — no holding. Stop saves the clip and <b>queues</b> it; it does <b>not</b> auto-upload. Uploads happen when you press <b>Sync</b>, automatically on boot if Wi-Fi is up, or via the Mac client.</p>
+
+  <h2>Device screens (240 × 240)</h2>
+  <div class="row">
+
+    <!-- READY -->
+    <div class="device">
+      <div class="btns"><div class="btn" data-b="Left"></div><div class="btn" data-b="Mid"></div><div class="btn" data-b="Right"></div></div>
+      <div class="screen">
+        <div class="hints"><div class="hint off">⏻ PWR</div><div class="hint sync">↻ SYNC</div><div class="hint rec">● REC</div></div>
+        <div class="wordmark">OPEN PLAUD</div>
+        <div class="center"><div class="state ready">READY</div><div class="note">tap ● to record</div></div>
+        <div class="foot">🔋 82% &nbsp;·&nbsp; 💾 1.2 GB used &nbsp;·&nbsp; Wi-Fi ✓</div>
+      </div>
+      <div class="cap">Idle — nothing to sync</div>
+    </div>
+
+    <!-- RECORDING -->
+    <div class="device">
+      <div class="btns"><div class="btn" data-b="Left"></div><div class="btn" data-b="Mid"></div><div class="btn" data-b="Right"></div></div>
+      <div class="screen">
+        <div class="hints"><div class="hint stop on">✕ CANCEL</div><div class="hint off">—</div><div class="hint stop">■ STOP</div></div>
+        <div class="wordmark">OPEN PLAUD</div>
+        <div class="center">
+          <div class="state rec">● REC</div>
+          <div class="big" style="color:#fff">00:12</div>
+          <div class="meter"><i style="width:62%"></i></div>
+          <div class="note">rec_0007.wav</div>
+        </div>
+        <div class="foot">🔋 82% &nbsp;·&nbsp; 💾 1.2 GB used &nbsp;·&nbsp; ~14h left</div>
+      </div>
+      <div class="cap">Recording — press Right again to Stop</div>
+    </div>
+
+    <!-- QUEUED -->
+    <div class="device">
+      <div class="btns"><div class="btn" data-b="Left"></div><div class="btn" data-b="Mid"></div><div class="btn" data-b="Right"></div></div>
+      <div class="screen">
+        <div class="hints"><div class="hint off">⏻ PWR</div><div class="hint sync on">↻ SYNC</div><div class="hint rec">● REC</div></div>
+        <div class="wordmark">OPEN PLAUD</div>
+        <div class="center"><div class="state done" style="color:#fff">SAVED ✓</div><div class="note" style="color:var(--amber)">2 clips to sync</div></div>
+        <div class="foot">press ↻ SYNC to upload</div>
+      </div>
+      <div class="cap">After Stop — clip saved &amp; queued (sync deferred)</div>
+    </div>
+
+    <!-- SYNCING -->
+    <div class="device">
+      <div class="btns"><div class="btn" data-b="Left"></div><div class="btn" data-b="Mid"></div><div class="btn" data-b="Right"></div></div>
+      <div class="screen">
+        <div class="hints"><div class="hint off">—</div><div class="hint stop on">✕ CANCEL</div><div class="hint off">—</div></div>
+        <div class="wordmark">OPEN PLAUD</div>
+        <div class="center">
+          <div class="state sync">SYNCING</div>
+          <div class="big" style="color:#fff;font-size:24px">2 / 3</div>
+          <div class="prog"><i style="width:66%"></i></div>
+        </div>
+        <div class="foot">uploading rec_0006.wav → Railway</div>
+      </div>
+      <div class="cap">Sync in progress</div>
+    </div>
+
+    <!-- OFFLINE -->
+    <div class="device">
+      <div class="btns"><div class="btn" data-b="Left"></div><div class="btn" data-b="Mid"></div><div class="btn" data-b="Right"></div></div>
+      <div class="screen">
+        <div class="hints"><div class="hint off">⏻ PWR</div><div class="hint sync on">↻ RETRY</div><div class="hint rec">● REC</div></div>
+        <div class="wordmark">OPEN PLAUD</div>
+        <div class="center"><div class="state off">NO WI-FI</div><div class="note">2 queued — connect to Mac<br>or move into Wi-Fi range</div></div>
+        <div class="foot">⚠ sync postponed</div>
+      </div>
+      <div class="cap">Sync pressed but offline — stays queued</div>
+    </div>
+
+    <!-- DONE -->
+    <div class="device">
+      <div class="btns"><div class="btn" data-b="Left"></div><div class="btn" data-b="Mid"></div><div class="btn" data-b="Right"></div></div>
+      <div class="screen">
+        <div class="hints"><div class="hint off">⏻ PWR</div><div class="hint off">↻ SYNC</div><div class="hint rec">● REC</div></div>
+        <div class="wordmark">OPEN PLAUD</div>
+        <div class="center"><div class="state done">ALL SYNCED ✓</div><div class="note">3 uploaded · transcribing</div></div>
+        <div class="foot">🔋 80% &nbsp;·&nbsp; 💾 1.4 GB used &nbsp;·&nbsp; Wi-Fi ✓</div>
+      </div>
+      <div class="cap">Sync complete</div>
+    </div>
+
+  </div>
+
+  <h2>Mac client (companion) — concept</h2>
+  <p class="sub">For when the device isn't on Wi-Fi: plug it into the Mac, and the client pulls clips off the device, uploads them to your Railway server, and manages settings (Wi-Fi, server URL, token).</p>
+  <div class="mac">
+    <div class="bar"><span class="traffic"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>&nbsp; open-plaud</div>
+    <div class="body">
+      <div style="font-size:13px;margin-bottom:6px"><span class="dot" style="background:var(--green)"></span><b>Device connected</b> &nbsp;<span class="note">SD16G · 44:1b:f6:86:4c:e8 · firmware f8e8dbf</span></div>
+      <div class="clip"><span>rec_0007.wav</span><span class="note">0:12 · just now</span><span style="flex:1"></span><span class="pill q">queued</span></div>
+      <div class="clip"><span>rec_0006.wav</span><span class="note">1:48 · 2h ago</span><span style="flex:1"></span><span class="pill q">queued</span></div>
+      <div class="clip"><span>rec_0005.wav</span><span class="note">0:31 · yesterday</span><span style="flex:1"></span><span class="pill s">synced ✓</span></div>
+      <button class="macbtn">⤴ Sync 2 clips to server</button>
+      <span class="note" style="margin-left:12px">Settings · Wi-Fi · Server URL · Token</span>
+    </div>
+  </div>
+  <p class="note">Connection options to pick: <b>(a)</b> device exposes its SD card as a USB drive (simplest — Mac reads WAVs directly), <b>(b)</b> a small USB-serial protocol, or <b>(c)</b> BLE (wireless, more work).</p>
+
+  <h2>Decisions to confirm</h2>
+  <div class="q"><b>1. Button map</b> — Left = Power, Middle = Sync, Right = Record/Stop. OK, or swap (e.g. Sync on the left)? (I'll confirm which physical button is which GPIO on the device.)</div>
+  <div class="q"><b>2. Record = toggle</b> — press Right to start, press again to stop. Confirmed?</div>
+  <div class="q"><b>3. Deferred sync</b> — Stop just saves+queues; upload only on Sync press / boot-with-Wi-Fi / Mac. Confirmed?</div>
+  <div class="q"><b>4. Mac client</b> — build it? If yes, which connection: <b>USB drive</b> (easiest), USB-serial, or BLE?</div>
+  <div class="q"><b>5. Third button (Left)</b> — Power/sleep, or something more useful (e.g. "mark moment" while recording, or "delete last")?</div>
+
+  <p class="note" style="margin-top:24px">This is a static mockup for sign-off — nothing here is wired to the firmware yet.</p>
+</div>
+</body>
+</html>
