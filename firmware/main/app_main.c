@@ -349,9 +349,8 @@ void app_main(void)
     }
     power_init();   /* battery sense is non-fatal: UI just shows "--" if absent */
 
-    /* Bring-up aid: the Left/Middle physical mapping is unverified (board.h).
-     * Press each button and confirm the GPIO logged here matches the label. */
-    ESP_LOGW(TAG, "button map (UNVERIFIED Left/Middle): LEFT=GPIO%d (power/screen, cancel) "
+    /* Logs the GPIO behind each on-screen label (mapping verified on hardware). */
+    ESP_LOGI(TAG, "button map: LEFT=GPIO%d (power/screen, cancel) "
                   "MIDDLE=GPIO%d (sync) RIGHT=GPIO%d (record/stop)",
              button_gpio(BTN_POWER), button_gpio(BTN_SYNC), button_gpio(BTN_RECORD));
 

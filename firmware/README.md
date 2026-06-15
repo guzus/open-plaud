@@ -16,11 +16,12 @@ on the next Sync press or boot. The LCD shows each button's current function
 along the top edge, plus battery and microSD usage. See the signed-off UX in
 [`docs/ui-prototype.html`](../docs/ui-prototype.html).
 
-> **Status: builds with ESP-IDF v5.4.1.** The end-to-end record → upload → cloud
-> loop was validated on a Waveshare board. The 3-button UX (toggle record,
-> deferred sync, on-screen button labels, battery + storage) is compile-verified;
-> the **Left/Middle physical button mapping** and the **battery divider** still
-> need a quick on-hardware check — see "Validate on first hardware bring-up".
+> **Status: validated on a Waveshare board (2026-06-16).** The end-to-end
+> record → upload → cloud loop works, and the 3-button UX (toggle record,
+> deferred sync, on-screen labels, battery + storage) was flashed and checked on
+> hardware. Button mapping is confirmed (leftmost=GPIO0=power, middle=GPIO5=sync,
+> rightmost=GPIO4=record). Remaining: the **battery divider** needs calibration —
+> see "Validate on first hardware bring-up".
 
 ## Prerequisites
 
@@ -60,9 +61,8 @@ hold **BOOT**, tap **RESET**, release BOOT to force download mode.
 
 Insert a FAT32 microSD. On boot you should see the SD info, `audio ready: 16000 Hz…`,
 a retry pass over clips left pending by earlier runs (oldest first, up to 64 per
-boot), a `button map (UNVERIFIED Left/Middle): LEFT=GPIO5 … MIDDLE=GPIO0 …
-RIGHT=GPIO4 …` line (press each button and confirm the logged GPIO matches the
-on-screen label), then `ready — tap Right (GPIO4) to record`.
+boot), a `button map: LEFT=GPIO0 … MIDDLE=GPIO5 … RIGHT=GPIO4 …` line, then
+`ready — tap Right (GPIO4) to record`.
 
 - **Tap Right** to start `rec_0001.wav`, `rec_0002.wav`, … (numbers are never
   reused — the root *and* `/sdcard/sent/` are scanned); **tap Right again** to
@@ -130,14 +130,12 @@ items to confirm with a board in hand:
   installed `esp_codec_dev` version these can double-configure/enable the RX path —
   watch for an error at `i2s_channel_enable`/`esp_codec_dev_open` and drop one side
   if so.
-- **Button polarity (`BSP_BTN_ACTIVE_LEVEL` in `board.h`).** UNVERIFIED
-  assumption: buttons short to GND and idle high on the internal pull-up, so
-  pressed == 0. If a recording starts by itself at boot, flip it to 1.
-- **Left/Middle physical mapping (`BSP_BTN_LEFT_GPIO`/`BSP_BTN_MIDDLE_GPIO` in
-  `board.h`).** Only Right (record) is anchored to GPIO4. Left=GPIO5 / Middle=GPIO0
-  is an assumption: if the on-screen labels point at the wrong buttons (e.g. the
-  physical left button triggers Sync), **swap those two lines**. Boot logs the
-  GPIO behind each label; press left/middle and confirm which fires.
+- **Button polarity / mapping — VERIFIED (2026-06-16).** Buttons are active-low
+  (short to GND, idle high on the internal pull-up). Physical layout confirmed by
+  pressing each and watching the screen: leftmost=GPIO0 (power/screen, cancel),
+  middle=GPIO5 (sync), rightmost=GPIO4 (record/stop) — set in `board.h`. Note the
+  leftmost button is GPIO0, the boot-strapping pin: holding it during power-on
+  enters ROM download mode instead of running the app.
 - **Toggle + cancel behavior.** Tap Right → it should start and keep recording
   after you let go (not stop on release). Tap Right again → stop + queue. Press
   Left mid-recording → clip discarded (no `rec_NNNN.wav` left behind). Confirm
@@ -181,7 +179,8 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Battery % + microSD usage on the LCD (incl. while recording).
 - [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
 - [x] Make `wifi_connect` re-enterable so uploads can retry within a boot.
-- [ ] Flash the 3-button build; confirm Left/Middle mapping + calibrate battery.
+- [x] Flash the 3-button build; confirm button mapping on hardware (2026-06-16).
+- [ ] Calibrate the battery divider (`power.c`) against a meter.
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 - [ ] Optional Mac companion client (USB drive / serial / BLE) for off-Wi-Fi sync.
 

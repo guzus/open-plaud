@@ -116,14 +116,14 @@
 
 /* Top-edge physical button positions for the 3-button UX. button.c maps
  * Right->record/stop, Middle->sync, Left->power/screen, and status.c draws each
- * button's label in that left/middle/right column. RIGHT is anchored: GPIO4 has
- * been the record button since v0. LEFT/MIDDLE are GPIO5/GPIO0, but WHICH IS
- * PHYSICALLY WHICH IS UNVERIFIED — same confidence as BSP_BTN_ACTIVE_LEVEL.
- * Boot logs the GPIO behind each label; if the on-screen labels point at the
- * wrong buttons on real hardware, swap the LEFT and MIDDLE lines below. */
-#define BSP_BTN_RIGHT_GPIO    BSP_PLUS_BUTTON_GPIO   /* record/stop (anchored)      */
-#define BSP_BTN_MIDDLE_GPIO   BSP_BOOT_BUTTON_GPIO   /* sync         (assumed middle)*/
-#define BSP_BTN_LEFT_GPIO     BSP_PWR_BUTTON_GPIO    /* power/screen (assumed left)  */
+ * button's label in that left/middle/right column. VERIFIED on hardware
+ * (2026-06-16) by pressing each button and watching the screen: physically
+ * leftmost = GPIO0, middle = GPIO5, rightmost = GPIO4. (Note: the leftmost
+ * button is GPIO0, the boot-strapping pin — holding it during power-on enters
+ * the ROM download mode instead of running the app.) */
+#define BSP_BTN_RIGHT_GPIO    BSP_PLUS_BUTTON_GPIO   /* record/stop  (GPIO4) */
+#define BSP_BTN_MIDDLE_GPIO   BSP_PWR_BUTTON_GPIO    /* sync         (GPIO5) */
+#define BSP_BTN_LEFT_GPIO     BSP_BOOT_BUTTON_GPIO   /* power/screen (GPIO0) */
 
 #define BSP_PA_CTRL_GPIO      7    /* speaker amp enable (playback)           */
 #define BSP_BAT_ADC_GPIO      1

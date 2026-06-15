@@ -54,22 +54,21 @@ static char s_clip[20];   /* owns the clip name; callers' pointers may dangle */
 
 /* Layout regions (240x240). Partial redraws target the TIMER and FOOTER bands. */
 #define UI_HINT_Y     0
-#define UI_HINT_H     20
-#define UI_WORD_Y     26
-#define UI_CARD_X     16
-#define UI_CARD_Y     42
-#define UI_CARD_W     (BSP_LCD_H_RES - 32)
-#define UI_CARD_H     150
-#define UI_TITLE_Y    56
-#define UI_TIMER_Y    102
-#define UI_DETAIL_Y   108
-#define UI_SUB_Y      146
-#define UI_BAR_X      (UI_CARD_X + 14)
-#define UI_BAR_W      (UI_CARD_W - 28)
-#define UI_BAR_Y      172
-#define UI_BAR_H      8
-#define UI_FOOTER_Y   212
-#define UI_FOOTER_H   24
+#define UI_HINT_H     28
+#define UI_CARD_X     10
+#define UI_CARD_Y     36
+#define UI_CARD_W     (BSP_LCD_H_RES - 20)
+#define UI_CARD_H     166
+#define UI_TITLE_Y    46
+#define UI_TIMER_Y    92
+#define UI_DETAIL_Y   98
+#define UI_SUB_Y      140
+#define UI_BAR_X      (UI_CARD_X + 16)
+#define UI_BAR_W      (UI_CARD_W - 32)
+#define UI_BAR_Y      170
+#define UI_BAR_H      10
+#define UI_FOOTER_Y   208
+#define UI_FOOTER_H   30
 
 static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_lcd_tx_done;
@@ -246,11 +245,11 @@ static void lcd_draw_text(int x, int y, const char *text, int scale, uint16_t fg
     const int w = text_width_px(text, scale);
     const int h = 7 * scale;
     if (text == NULL || scale <= 0 || w <= 0 || h <= 0 ||
-        w > BSP_LCD_H_RES || h > 32) {
+        w > BSP_LCD_H_RES || h > 40) {
         return;
     }
 
-    static uint16_t pixels[BSP_LCD_H_RES * 32];
+    static uint16_t pixels[BSP_LCD_H_RES * 40];
     for (int i = 0; i < w * h; i++) {
         pixels[i] = bg;
     }
@@ -293,8 +292,8 @@ static void lcd_draw_text_centered(int y, const char *text, int scale, uint16_t 
 static void draw_hint(int col, const char *txt, uint16_t fg)
 {
     const int colw = BSP_LCD_H_RES / 3;
-    const int x = col * colw + (colw - text_width_px(txt, 1)) / 2;
-    lcd_draw_text(x, UI_HINT_Y + 6, txt, 1, fg, UI_COLOR_HEADER);
+    const int x = col * colw + (colw - text_width_px(txt, 2)) / 2;
+    lcd_draw_text(x, UI_HINT_Y + 7, txt, 2, fg, UI_COLOR_HEADER);
 }
 
 static void draw_hints(open_plaud_status_t status, const status_info_t *info)
@@ -352,15 +351,14 @@ static void draw_footer(void)
     uint64_t used = 0, total = 0;
     if (sdcard_usage(&used, &total) == ESP_OK && total > 0) {
         unsigned used_tenths = (unsigned)(used / 100000000ULL);          /* 0.1 GB */
-        unsigned total_gb = (unsigned)((total + 500000000ULL) / 1000000000ULL);
-        snprintf(sd, sizeof sd, "SD %u.%u/%uG", used_tenths / 10, used_tenths % 10, total_gb);
+        snprintf(sd, sizeof sd, "SD %u.%uG", used_tenths / 10, used_tenths % 10);
     } else {
         snprintf(sd, sizeof sd, "SD --");
     }
 
     char foot[64];
     snprintf(foot, sizeof foot, "%s  %s", bat, sd);
-    lcd_draw_text_centered(UI_FOOTER_Y + 6, foot, 1, UI_COLOR_MUTED, UI_COLOR_BG);
+    lcd_draw_text_centered(UI_FOOTER_Y + 7, foot, 2, UI_COLOR_MUTED, UI_COLOR_BG);
 }
 
 static void draw_bar(int filled_pct, uint16_t color)
@@ -392,8 +390,8 @@ static void draw_timer(int elapsed_s)
 {
     char t[8];
     fmt_mmss(elapsed_s, t, sizeof t);
-    lcd_fill_rect(UI_CARD_X, UI_TIMER_Y, UI_CARD_W, 7 * 4, UI_COLOR_CARD);
-    lcd_draw_text_centered(UI_TIMER_Y, t, 4, UI_COLOR_TEXT, UI_COLOR_CARD);
+    lcd_fill_rect(UI_CARD_X, UI_TIMER_Y, UI_CARD_W, 7 * 5, UI_COLOR_CARD);
+    lcd_draw_text_centered(UI_TIMER_Y, t, 5, UI_COLOR_TEXT, UI_COLOR_CARD);
 
     int pct = 0;
     if (CONFIG_OPEN_PLAUD_MAX_REC_SECONDS > 0) {
@@ -407,7 +405,6 @@ static void lcd_draw_full(open_plaud_status_t status, const status_info_t *info)
     const uint16_t accent = status_color(status);
     lcd_fill_rect(0, UI_HINT_H, BSP_LCD_H_RES, BSP_LCD_V_RES - UI_HINT_H, UI_COLOR_BG);
     draw_hints(status, info);
-    lcd_draw_text_centered(UI_WORD_Y, "OPEN PLAUD", 1, UI_COLOR_WORDMARK, UI_COLOR_BG);
 
     lcd_fill_rect(UI_CARD_X, UI_CARD_Y, UI_CARD_W, UI_CARD_H, UI_COLOR_CARD);
     lcd_fill_rect(UI_CARD_X, UI_CARD_Y, UI_CARD_W, 4, accent);
@@ -417,71 +414,71 @@ static void lcd_draw_full(open_plaud_status_t status, const status_info_t *info)
 
     switch (status) {
     case OPEN_PLAUD_STATUS_BOOT:
-        lcd_draw_text_centered(UI_TITLE_Y, "BOOT", 4, accent, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_DETAIL_Y, "STARTING", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "BOOT", 5, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, "STARTING", 3, UI_COLOR_TEXT, UI_COLOR_CARD);
         break;
     case OPEN_PLAUD_STATUS_READY:
-        lcd_draw_text_centered(UI_TITLE_Y, "READY", 4, accent, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_DETAIL_Y, "TAP REC", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_SUB_Y, "PRESS RIGHT TO RECORD", 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "READY", 5, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, "TAP REC", 3, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "TAP RIGHT TO REC", 2, UI_COLOR_MUTED, UI_COLOR_CARD);
         break;
     case OPEN_PLAUD_STATUS_RECORDING:
-        lcd_draw_text_centered(UI_TITLE_Y, "REC", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "REC", 5, accent, UI_COLOR_CARD);
         draw_timer(info ? info->elapsed_s : 0);
         if (info && info->clip) {
-            lcd_draw_text_centered(UI_SUB_Y, info->clip, 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+            lcd_draw_text_centered(UI_SUB_Y, info->clip, 2, UI_COLOR_MUTED, UI_COLOR_CARD);
         }
         break;
     case OPEN_PLAUD_STATUS_SAVED:
-        lcd_draw_text_centered(UI_TITLE_Y, "SAVED", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "SAVED", 5, accent, UI_COLOR_CARD);
         if (info && info->pending > 0) {
             snprintf(detail, sizeof detail, "%d TO SYNC", info->pending);
         } else {
             snprintf(detail, sizeof detail, "QUEUED");
         }
-        lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_SUB_Y, "PRESS SYNC TO UPLOAD", 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, detail, 3, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "TAP SYNC TO UPLOAD", 2, UI_COLOR_MUTED, UI_COLOR_CARD);
         break;
     case OPEN_PLAUD_STATUS_SYNCING:
-        lcd_draw_text_centered(UI_TITLE_Y, "SYNCING", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "SYNCING", 5, accent, UI_COLOR_CARD);
         if (info && info->sync_total > 0) {
             snprintf(detail, sizeof detail, "%d OF %d",
                      info->sync_done < 0 ? 0 : info->sync_done, info->sync_total);
-            lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+            lcd_draw_text_centered(UI_DETAIL_Y, detail, 3, UI_COLOR_TEXT, UI_COLOR_CARD);
             int pct = info->sync_total > 0
                 ? (info->sync_done < 0 ? 0 : info->sync_done) * 100 / info->sync_total
                 : 0;
             draw_bar(pct, accent);
         } else {
-            lcd_draw_text_centered(UI_DETAIL_Y, "UPLOADING", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+            lcd_draw_text_centered(UI_DETAIL_Y, "UPLOADING", 3, UI_COLOR_TEXT, UI_COLOR_CARD);
         }
         if (info && info->clip) {
-            lcd_draw_text_centered(UI_SUB_Y, info->clip, 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+            lcd_draw_text_centered(UI_SUB_Y, info->clip, 2, UI_COLOR_MUTED, UI_COLOR_CARD);
         }
         break;
     case OPEN_PLAUD_STATUS_DONE:
-        lcd_draw_text_centered(UI_TITLE_Y, "DONE", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "DONE", 5, accent, UI_COLOR_CARD);
         if (info && info->sync_done > 0) {
             snprintf(detail, sizeof detail, "%d SENT", info->sync_done);
         } else {
             snprintf(detail, sizeof detail, "ALL SYNCED");
         }
-        lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, detail, 3, UI_COLOR_TEXT, UI_COLOR_CARD);
         break;
     case OPEN_PLAUD_STATUS_OFFLINE:
-        lcd_draw_text_centered(UI_TITLE_Y, "NO WIFI", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "NO WIFI", 5, accent, UI_COLOR_CARD);
         if (info && info->pending > 0) {
             snprintf(detail, sizeof detail, "%d QUEUED", info->pending);
         } else {
             snprintf(detail, sizeof detail, "QUEUED");
         }
-        lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_SUB_Y, "SYNC POSTPONED", 1, UI_COLOR_OFFLINE, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, detail, 3, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "SYNC POSTPONED", 2, UI_COLOR_OFFLINE, UI_COLOR_CARD);
         break;
     case OPEN_PLAUD_STATUS_ERROR:
-        lcd_draw_text_centered(UI_TITLE_Y, "ERROR", 4, accent, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_DETAIL_Y, "CHECK SD WIFI", 1, UI_COLOR_TEXT, UI_COLOR_CARD);
-        lcd_draw_text_centered(UI_SUB_Y, "SEE SERIAL LOG", 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_TITLE_Y, "ERROR", 5, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, "CHECK SD WIFI", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "SEE SERIAL LOG", 2, UI_COLOR_MUTED, UI_COLOR_CARD);
         break;
     }
 
