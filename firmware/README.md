@@ -80,7 +80,10 @@ A recording auto-stops after `OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s).
 (torn down after the WAV closes) and Wi-Fi is started only for upload work and
 stopped after each batch. The CPU still polls buttons in the ready loop; deep
 sleep + button wake remains a follow-up. Battery % uses a calibrated 3:1 divider
-(`power.c`), and the **Left** button blanks the screen to save the backlight.
+(`power.c`), and the **Left** button blanks the screen to save the backlight. See
+[`docs/POWER.md`](../docs/POWER.md) for estimated battery life (~3–8 h active use;
+multi-day standby needs deep sleep) and how to replace the estimates with
+measurements.
 
 ## Layout
 
