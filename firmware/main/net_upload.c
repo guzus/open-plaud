@@ -42,10 +42,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         if (s_wifi_events) {
             xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
         }
+        int reason = event_data ? ((wifi_event_sta_disconnected_t *)event_data)->reason : -1;
         if (s_retry_count < CONFIG_OPEN_PLAUD_WIFI_MAX_RETRIES) {
             s_retry_count++;
-            ESP_LOGW(TAG, "Wi-Fi disconnected, retrying (%d/%d)",
-                     s_retry_count, CONFIG_OPEN_PLAUD_WIFI_MAX_RETRIES);
+            /* reason 201 = NO_AP_FOUND (wrong SSID/band/range); 15 = handshake
+             * timeout / 2 = auth expire (usually a wrong password). */
+            ESP_LOGW(TAG, "Wi-Fi disconnected (reason %d), retrying (%d/%d)",
+                     reason, s_retry_count, CONFIG_OPEN_PLAUD_WIFI_MAX_RETRIES);
             esp_wifi_connect();
         } else {
             xEventGroupSetBits(s_wifi_events, WIFI_FAIL_BIT);

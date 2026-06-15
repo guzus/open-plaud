@@ -83,10 +83,11 @@ menu "open-plaud"
 
     choice OPEN_PLAUD_SDMMC_WIDTH_CHOICE
         prompt "SDMMC bus width"
-        default OPEN_PLAUD_SDMMC_WIDTH_1
+        default OPEN_PLAUD_SDMMC_WIDTH_4
         help
-            The LCD-1.54 bring-up path defaults to 1-bit SDMMC. Use 4-bit only
-            after hardware validation confirms CMD/D0-D3 are stable.
+            4-bit is validated on the Waveshare ESP32-S3-LCD-1.54 (it matches
+            Waveshare's own SD example and mounts reliably). 1-bit was not
+            re-confirmed with a known-good card during bring-up; prefer 4-bit.
 
         config OPEN_PLAUD_SDMMC_WIDTH_1
             bool "1-bit"
