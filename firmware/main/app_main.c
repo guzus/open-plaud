@@ -1,7 +1,7 @@
 /*
  * open-plaud recorder - hold-to-record firmware.
  *
- * Boot: mount SD -> clip store -> init audio/button/status -> retry any clips
+ * Boot: mount SD -> clip store -> init button/status -> retry any clips
  * a previous run failed to upload. Then loop forever: hold PLUS to record a
  * numbered WAV (rec_NNNN.wav, never reused), release to stop and upload.
  * Uploaded clips move to /sdcard/sent; failed uploads stay in the card root
@@ -49,6 +49,7 @@ static void retry_pending_clips(const char *context)
 {
     bool upload_failed = false;
     int cleared = rec_store_retry_pending(&upload_failed);
+    net_upload_shutdown();
     ESP_LOGI(TAG, "%s retry queue: %d pending clip(s) uploaded", context, cleared);
     if (upload_failed) {
         ESP_LOGW(TAG, "%s retry queue not fully drained; clips stay queued on SD",
@@ -62,9 +63,15 @@ static void retry_pending_clips(const char *context)
  */
 static esp_err_t record_clip(const char *path)
 {
+    if (audio_init() != ESP_OK) {
+        ESP_LOGE(TAG, "audio init failed - recording skipped");
+        return ESP_FAIL;
+    }
+
     wav_writer_t wav;
     if (wav_open(&wav, path, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITS) != ESP_OK) {
         ESP_LOGE(TAG, "cannot open %s", path);
+        audio_deinit();
         return ESP_FAIL;
     }
 
@@ -119,6 +126,8 @@ static esp_err_t record_clip(const char *path)
     }
 
     bool close_ok = (wav_close(&wav) == ESP_OK);
+    audio_deinit();
+
     if (written == 0) {
         remove(path);
         ESP_LOGW(TAG, "no audio captured - removed %s", path);
@@ -156,16 +165,9 @@ void app_main(void)
         sdcard_unmount();
         return;
     }
-    if (audio_init() != ESP_OK) {
-        ESP_LOGE(TAG, "audio init failed - halting");
-        status_show(OPEN_PLAUD_STATUS_ERROR);
-        sdcard_unmount();
-        return;
-    }
     if (button_init() != ESP_OK) {
         ESP_LOGE(TAG, "button init failed - halting");
         status_show(OPEN_PLAUD_STATUS_ERROR);
-        audio_deinit();
         sdcard_unmount();
         return;
     }
@@ -195,8 +197,10 @@ void app_main(void)
                 } else {
                     retry_pending_clips("post-upload");
                 }
+                net_upload_shutdown();
                 status_show(OPEN_PLAUD_STATUS_DONE);
             } else {
+                net_upload_shutdown();
                 ESP_LOGW(TAG, "upload failed; %s queued on SD for retry", path);
                 status_show(OPEN_PLAUD_STATUS_ERROR);
             }

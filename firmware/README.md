@@ -47,8 +47,7 @@ idf.py -B build-rev-a -DSDKCONFIG=build-rev-a/sdkconfig \
 `idf.py` pulls managed components on first build. If the port doesn't appear,
 hold **BOOT**, tap **RESET**, release BOOT to force download mode.
 
-Insert a FAT32 microSD. On boot you should see the SD info, `audio ready: 16000 Hz…`,
-a retry pass over clips left pending by earlier runs (oldest first, up to 64 per
+Insert a FAT32 microSD. On boot you should see the SD info, a retry pass over clips left pending by earlier runs (oldest first, up to 64 per
 boot), then `ready — hold PLUS (GPIO4) to record`. Hold **PLUS** to record
 `rec_0001.wav`, `rec_0002.wav`, … (numbers are never reused — the root *and*
 `/sdcard/sent/` are scanned); release to stop and upload to
@@ -57,6 +56,12 @@ upload failure the clip stays in the SD root; the next upload attempt can
 re-enter Wi-Fi setup in the same boot, and the next boot's retry pass also
 clears the backlog. A held button auto-stops after
 `OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s) and a new press starts a new clip.
+
+Power behavior: audio capture is initialized only while a clip is actively
+recording, then torn down after the WAV closes. Wi-Fi is started only for upload
+work and stopped again when a retry batch or single upload attempt completes.
+The firmware still keeps the ESP32-S3 awake in the ready loop; deep sleep and
+button wake remain a hardware-validation step.
 
 ## Layout
 
@@ -130,6 +135,11 @@ items to confirm with a board in hand:
   to mono before upload (halves file size and cloud-Whisper cost) unless
   diarization needs both. Not a correctness issue: server-side `whisper_cpp` was
   verified to transcribe device-shaped stereo 16 kHz WAVs as-is.
+- **Low-power behavior.** Audio and Wi-Fi are no longer held active while idle,
+  but the ready loop still polls the button on the running CPU. Measure battery
+  current in ready, recording, and upload states before adding ESP32-S3 deep
+  sleep; deep-sleep wake on PLUS must be validated against the Waveshare battery
+  power-latch behavior and the hold-to-record UX.
 - **Custom Rev A PDM path.** The proposed pin map compiles with ESP-IDF PDM RX
   and RGB status output, but the schematic, mic select wiring, acoustic ports,
   and LED polarity still need board-level validation.
@@ -148,7 +158,9 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Make `wifi_connect` re-enterable so uploads can retry within a boot
       instead of latching off until reboot.
 - [x] LCD/log status UI via ST7789 screen states and RGB status colors.
+- [x] Power down audio outside active recording and stop Wi-Fi after upload work.
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
+- [ ] Add measured-current table and validate deep-sleep wake on real hardware.
 
 ## Sources
 

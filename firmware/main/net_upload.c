@@ -169,6 +169,32 @@ static esp_err_t wifi_connect(void)
     return ESP_FAIL;
 }
 
+void net_upload_shutdown(void)
+{
+    if (!s_wifi_started) {
+        return;
+    }
+
+    if (s_wifi_events) {
+        xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    }
+
+    esp_err_t err = esp_wifi_disconnect();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
+        ESP_LOGW(TAG, "Wi-Fi disconnect before stop failed: %s", esp_err_to_name(err));
+    }
+
+    err = esp_wifi_stop();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED) {
+        ESP_LOGW(TAG, "Wi-Fi stop failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    s_wifi_started = false;
+    s_retry_count = 0;
+    ESP_LOGI(TAG, "Wi-Fi STA stopped");
+}
+
 static esp_err_t build_upload_url(char *buf, size_t len)
 {
     const char *base = CONFIG_OPEN_PLAUD_SERVER_URL;
