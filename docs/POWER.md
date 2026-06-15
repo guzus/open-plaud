@@ -9,14 +9,19 @@
 
 ## TL;DR
 
-With the current firmware (no deep sleep yet), the recorder is a **use-and-charge**
-device measured in **hours**, not days:
+While *actively on*, the recorder is a **use-and-charge** device measured in
+**hours**:
 
 - **Idle, screen on:** ~3–8 h (depending on cell size)
 - **Idle, screen off** (tap the **Left/Power** button to blank the backlight): ~6–14 h
 - **Continuous recording:** ~2–5 h
-- **Multi-day standby** is **not** possible until **deep sleep** is added (the one
-  big remaining power win — see below). With it, standby jumps to **months**.
+
+But it no longer *stays* actively on: **deep sleep is implemented** — after an idle
+timeout (`OPEN_PLAUD_IDLE_SLEEP_S`, default 60 s) the device sleeps and wakes
+(reboots, ~2 s) on a **Record or Sync** press. Sleep/wake is **verified on
+hardware**; the actual sleep *current* is **not yet measured**, so the
+months-scale standby below is **expected, not confirmed**. The screen also blanks
+while recording (`OPEN_PLAUD_REC_SCREEN_S`, default 10 s) to drop the backlight.
 
 Sync (Wi-Fi upload) is the heaviest state but only runs for seconds per clip, so
 it barely affects daily life.
@@ -40,7 +45,7 @@ audio is **off** except during recording (the firmware enforces both — see bel
 | Ready, **screen off** | **~30 mA** | 25–45 | ESP32-S3 active radio-off only (backlight blanked) |
 | **Recording** | **~85 mA** | 70–120 | SoC (~35) + backlight (~20) + ES7210 + mics (~12) + microSD writes (~20) |
 | **Syncing** (Wi-Fi upload) | **~210 mA avg** | 150–300 peak | SoC + backlight + Wi-Fi TX (~150 avg, bursts to ~340). Lasts only seconds/clip. |
-| Deep sleep *(not yet implemented)* | **~0.02 mA** | 0.01–0.3 | RTC + GPIO wake only; radio/CPU/peripherals off |
+| Deep sleep *(implemented; draw unmeasured)* | **~0.02 mA** chip | 0.01–0.3 chip | RTC + EXT1 button wake only; CPU/radio/peripherals off. **Board** regulator + LCD-controller quiescent likely dominate — measure. |
 
 Basis: ESP32-S3 active current with the radio off is ~30–45 mA (Espressif
 datasheet); the ready loop `vTaskDelay(20 ms)`s between button polls so the CPU
@@ -60,8 +65,8 @@ the single biggest *idle* load, which is why the Power button blanks it.
 | Deep sleep standby (~0.02 mA)† | ~350 d | ~530 d | ~880 d |
 
 \* Reference only — a real sync is seconds per clip, not continuous.
-† Once implemented; in practice LiPo self-discharge caps useful standby at a few
-months regardless.
+† Chip-only estimate (board sleep draw not yet measured — likely higher); LiPo
+self-discharge caps useful standby at a few months regardless.
 
 ## Representative scenarios (300 mAh cell, ~255 mAh usable)
 
@@ -73,19 +78,23 @@ months regardless.
 - **Leave it on the desk, screen on, doing nothing:** dead in **~5 h**. Blank the
   screen (Left button) to roughly double idle endurance.
 
-## The deep-sleep opportunity (biggest remaining win)
+## Deep sleep (implemented)
 
-The firmware currently keeps the CPU awake in the ready loop polling buttons
-(~30–50 mA). ESP32-S3 **deep sleep** with a GPIO/EXT1 wake on the Record button
-would cut ready draw to **tens of microamps** — turning "hours" of standby into
-**months**. This is the single highest-impact power change and is tracked as a
-TODO. It needs validating against:
+After `OPEN_PLAUD_IDLE_SLEEP_S` (default 60 s) with no button press, the device
+enters ESP32-S3 deep sleep and wakes on an **EXT1 button press**. Verified on
+hardware (2026-06-16): it sleeps, **stays** asleep (no spurious wake), wakes on
+**Record (GPIO4)** and **Sync (GPIO5)**, and does **not** wake on **Left
+(GPIO0)** — GPIO0 is the boot strapping pin, so it is deliberately excluded (held
+low at the wake-reset would drop the chip into ROM download mode). Wake is a full
+reboot (~2 s back to ready); the boot path skips the Wi-Fi retry and SD
+autoformat on a wake so it stays fast and safe. (A nice side-effect: the
+USB-Serial/JTAG port disappears while asleep — handy confirmation it really slept.)
 
-- the Waveshare battery **power-latch / charge-path** behavior (does the board
-  stay powered from the cell in deep sleep?), and
-- a **wake source** on the Record button (note the Left button is GPIO0, the
-  strapping pin — prefer the Record button GPIO4 for wake), redrawing the LCD on
-  wake.
+**Still to measure:** the actual sleep *current*. The ESP32-S3 core sleeps to
+~tens of µA, but the **board** draw (LDO/charger quiescent, LCD controller) is
+unmeasured and likely dominates — put a meter on the cell in deep sleep to turn
+the "months" estimate into a real number. Also confirm the Waveshare
+**power-latch / charge-path** keeps the board powered from the cell while asleep.
 
 ## What the firmware already does for power
 

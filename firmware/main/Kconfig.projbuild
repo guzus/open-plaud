@@ -81,6 +81,24 @@ menu "open-plaud"
             Finite I2S read timeout; callers can abort clips instead of hanging
             forever on a wedged DMA/clock path.
 
+    config OPEN_PLAUD_IDLE_SLEEP_S
+        int "Idle seconds before deep sleep (0 = never sleep)"
+        default 60
+        range 0 3600
+        help
+            After this many seconds with no button press in the ready/idle
+            screen, the device enters deep sleep and wakes on a Record or Sync
+            press (a reset/reboot, ~2 s back to ready). 0 disables auto sleep.
+
+    config OPEN_PLAUD_REC_SCREEN_S
+        int "Seconds before the screen blanks while recording (0 = never)"
+        default 10
+        range 0 600
+        help
+            While recording, the LCD backlight turns off after this many seconds
+            with no button press to save power; any button press turns it back
+            on. Recording continues regardless. 0 keeps the screen on.
+
     choice OPEN_PLAUD_SDMMC_WIDTH_CHOICE
         prompt "SDMMC bus width"
         default OPEN_PLAUD_SDMMC_WIDTH_4

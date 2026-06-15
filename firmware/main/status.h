@@ -42,3 +42,9 @@ void status_tick_idle(void);
 /* Power button: blank or restore the panel backlight without tearing down the
  * display pipeline. status_display(true) repaints the current screen. */
 void status_display(bool on);
+
+/* Backlight-only toggle: flips the LCD backlight (and the internal "display on"
+ * gate) WITHOUT any redraw. The ST7789 retains its frame while the backlight is
+ * off, so re-enabling shows the last screen instantly — cheap enough to call
+ * from the recording loop (no DMA, no I2S stall). */
+void status_backlight(bool on);

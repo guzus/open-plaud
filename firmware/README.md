@@ -76,14 +76,15 @@ boot), a `button map: LEFT=GPIO0 … MIDDLE=GPIO5 … RIGHT=GPIO4 …` line, the
 
 A recording auto-stops after `OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s).
 
-**Power:** to cut idle draw, audio is initialized only while a clip is recording
-(torn down after the WAV closes) and Wi-Fi is started only for upload work and
-stopped after each batch. The CPU still polls buttons in the ready loop; deep
-sleep + button wake remains a follow-up. Battery % uses a calibrated 3:1 divider
-(`power.c`), and the **Left** button blanks the screen to save the backlight. See
-[`docs/POWER.md`](../docs/POWER.md) for estimated battery life (~3–8 h active use;
-multi-day standby needs deep sleep) and how to replace the estimates with
-measurements.
+**Power:** to cut draw, audio is initialized only while a clip is recording (torn
+down after the WAV closes), Wi-Fi is started only for upload work and stopped
+after each batch, the screen blanks while recording (`OPEN_PLAUD_REC_SCREEN_S`,
+default 10 s), and the device enters **deep sleep** after an idle timeout
+(`OPEN_PLAUD_IDLE_SLEEP_S`, default 60 s), waking on a Record/Sync press. Battery
+% uses a calibrated 3:1 divider (`power.c`); the **Left** button also blanks the
+screen on demand. See [`docs/POWER.md`](../docs/POWER.md) for estimated battery
+life (~3–8 h active; deep-sleep standby implemented, draw still to be measured)
+and how to replace the estimates with measurements.
 
 ## Layout
 
@@ -191,6 +192,10 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Power down audio outside recording + stop Wi-Fi after upload (idle draw).
 - [x] Calibrate the battery divider (3:1) so the % reads true (2026-06-16).
 - [x] Flash the 3-button build; confirm button mapping on hardware (2026-06-16).
+- [x] Deep sleep after idle + screen-off while recording; wake on Record/Sync
+      (EXT1), verified on hardware (2026-06-16).
+- [ ] Measure real deep-sleep current on the cell (turn the "months" estimate
+      into a number; confirm the board stays cell-powered while asleep).
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 - [ ] Optional Mac companion client (USB drive / serial / BLE) for off-Wi-Fi sync.
 
