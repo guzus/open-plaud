@@ -59,12 +59,22 @@ public final class SyncStateStore: @unchecked Sendable {
     }
 
     /// Upsert a record and flush to disk immediately (durable).
+    ///
+    /// The mutation AND the disk write happen under the same lock. This is
+    /// essential for idempotency under the concurrent upload workers: if the
+    /// write happened outside the lock, two workers could capture snapshots in
+    /// one order but have their atomic file renames land in the other order,
+    /// dropping a `synced` key from disk — and the next run would re-upload that
+    /// clip (the server has no content-dedup). Serializing the write under the
+    /// lock makes on-disk order match snapshot order. The write is a small
+    /// synchronous JSON encode + atomic replace; it is dwarfed by the network
+    /// upload each worker is doing, and there is no async/reentrancy here, so it
+    /// cannot deadlock.
     public func set(_ identity: ClipIdentity, _ record: SyncRecord) {
         lock.lock()
+        defer { lock.unlock() }
         records[identity.key] = record
-        let snapshot = records
-        lock.unlock()
-        persist(snapshot)
+        persist(records)
     }
 
     /// Snapshot of all records (for diagnostics / tests).

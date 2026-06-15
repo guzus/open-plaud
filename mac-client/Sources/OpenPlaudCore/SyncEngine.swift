@@ -97,9 +97,11 @@ public final class SyncEngine: @unchecked Sendable {
     ) async {
         let id = clip.identity
 
-        // Mark syncing (in-memory + UI). We deliberately do NOT persist "syncing"
-        // as a resumable disk state — a crash should leave it re-queued, not stuck.
-        store.set(id, SyncRecord(state: .syncing, remoteID: nil, lastError: nil))
+        // Mark syncing for the UI only — we deliberately do NOT persist "syncing"
+        // to disk. A crash mid-upload must leave the clip re-queued (so it's
+        // retried), not stuck in a "syncing" limbo, and only a terminal state
+        // (synced/failed) is worth a durable write. Not writing here also halves
+        // the per-clip disk writes, keeping the durable-write path light.
         emit(onProgress, id, clip.filename, .syncing, nil, nil)
 
         var attempt = 0

@@ -97,6 +97,30 @@ public enum SelfTest {
             let c = ClipIdentity(filename: "rec_0001.wav", sizeBytes: 10, mtimeEpoch: 2)
             return a.key != b.key && a.key != c.key
         }
+        check("idempotency: concurrent set() never loses a synced key on disk") {
+            // Regression test for the lost-update race: many workers writing
+            // distinct keys at once must ALL survive to disk (write order must
+            // match snapshot order). Before the fix (persist outside the lock)
+            // an earlier snapshot's atomic rename could land last and drop keys;
+            // a fresh store reading the file would then miss them → re-upload.
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("op-race-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("state.json")
+            let store = SyncStateStore(fileURL: url)
+            let n = 200
+            DispatchQueue.concurrentPerform(iterations: n) { i in
+                let id = ClipIdentity(filename: "rec_\(i).wav", sizeBytes: i, mtimeEpoch: i)
+                store.set(id, SyncRecord(state: .synced, remoteID: "r\(i)"))
+            }
+            // A brand-new store reads ONLY the durable file — proves disk state,
+            // not the in-memory dictionary.
+            let reopened = SyncStateStore(fileURL: url)
+            for i in 0..<n {
+                let id = ClipIdentity(filename: "rec_\(i).wav", sizeBytes: i, mtimeEpoch: i)
+                if !reopened.isSynced(id) { return false }
+            }
+            return reopened.all().count == n
+        }
 
         // --- Retry classification ---
         check("retry: transient/5xx/429 retriable; 401/400/file not retriable") {
