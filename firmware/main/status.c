@@ -696,3 +696,16 @@ void status_display(bool on)
     (void)on;
 #endif
 }
+
+void status_backlight(bool on)
+{
+#if BSP_HAS_LCD
+    if (!s_lcd_ready || on == s_display_on) {
+        return;
+    }
+    s_display_on = on;
+    gpio_set_level(BSP_LCD_BL_GPIO, on ? 1 : 0);
+#else
+    (void)on;
+#endif
+}

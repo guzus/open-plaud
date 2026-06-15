@@ -3,8 +3,10 @@
  *
  * Boot: mount SD -> clip store -> buttons/power/status -> auto-retry any clips a
  * previous run failed to upload (uploads happen on boot if Wi-Fi is up). To cut
- * idle battery draw, audio is initialized only while a clip records, and Wi-Fi
- * is stopped after each upload batch.
+ * idle battery draw, audio is initialized only while a clip records, Wi-Fi is
+ * stopped after each upload batch, the screen blanks while recording, and the
+ * device enters deep sleep after an idle timeout (wakes on Record/Sync — a
+ * reboot, not a resume).
  * Then poll three top-edge buttons forever:
  *
  *   Right  (record) : tap to start recording, tap again to stop. Stop SAVES the
@@ -163,6 +165,8 @@ static record_result_t record_clip(const char *path)
 
     bool stop_armed = false;            /* Right released since the start press */
     int right_rel = 0, right_press = 0, left_press = 0;
+    bool rec_screen_on = true;          /* backlight state during this clip */
+    int rec_screen_idle = 0;            /* button-free polls (for screen blank) */
     record_result_t result = REC_SAVED;
 
     ESP_LOGI(TAG, "recording %s (tap Right to stop, Left to cancel)", path);
@@ -173,6 +177,7 @@ static record_result_t record_clip(const char *path)
          * ~the read timeout during a stall. */
         const bool right = button_is_down(BTN_RECORD);
         const bool left = button_is_down(BTN_POWER);
+        const bool middle = button_is_down(BTN_SYNC);
         if (!stop_armed) {
             right_rel = right ? 0 : right_rel + 1;
             if (right_rel >= BTN_DEBOUNCE_POLLS) {
@@ -193,6 +198,22 @@ static record_result_t record_clip(const char *path)
             ESP_LOGI(TAG, "cancel pressed");
             result = REC_CANCELLED;
             break;
+        }
+
+        /* Screen-off while recording saves the backlight; any button press wakes
+         * it. The panel keeps its frame, so wake is backlight-only — no redraw,
+         * no DMA on this capture task. */
+        if (right || left || middle) {
+            rec_screen_idle = 0;
+            if (!rec_screen_on) {
+                status_backlight(true);
+                rec_screen_on = true;
+                status_tick_recording(elapsed_shown < 0 ? 0 : elapsed_shown);
+            }
+        } else if (rec_screen_on && CONFIG_OPEN_PLAUD_REC_SCREEN_S > 0 &&
+                   ++rec_screen_idle >= CONFIG_OPEN_PLAUD_REC_SCREEN_S * 16) {
+            status_backlight(false);
+            rec_screen_on = false;
         }
 
         size_t got = 0;
@@ -273,6 +294,7 @@ static void do_record(void)
     status_update(OPEN_PLAUD_STATUS_RECORDING, &info);
 
     const record_result_t r = record_clip(path);
+    status_backlight(true);   /* recording may have blanked the screen — restore it */
     if (r == REC_FAILED) {
         status_show(OPEN_PLAUD_STATUS_ERROR);
         vTaskDelay(pdMS_TO_TICKS(1500));
@@ -336,7 +358,12 @@ void app_main(void)
         ESP_ERROR_CHECK(nvs_flash_init());
     }
 
-    if (sdcard_mount() != ESP_OK) {
+    /* A deep-sleep wake is a full reboot. When we woke from a button, skip the
+     * heavy boot work (Wi-Fi retry) and never autoformat the SD, so a wake is
+     * fast and can't wipe a card on a transient mount glitch. */
+    const bool from_sleep = power_woke_from_button();
+
+    if (sdcard_mount(!from_sleep) != ESP_OK) {
         ESP_LOGE(TAG, "no SD card - halting");
         status_show(OPEN_PLAUD_STATUS_ERROR);
         return;
@@ -360,10 +387,12 @@ void app_main(void)
                   "MIDDLE=GPIO%d (sync) RIGHT=GPIO%d (record/stop)",
              button_gpio(BTN_POWER), button_gpio(BTN_SYNC), button_gpio(BTN_RECORD));
 
-    /* Drain the retry queue once per boot, before any new recording. Upload
-     * failures are not latched: a later Sync press re-enters Wi-Fi setup. */
-    status_show(OPEN_PLAUD_STATUS_SYNCING);
-    retry_pending_clips("boot");
+    /* Drain the retry queue on a cold boot only — not on a deep-sleep wake, which
+     * would spend Wi-Fi current on every button press. A later Sync drains it. */
+    if (!from_sleep) {
+        status_show(OPEN_PLAUD_STATUS_SYNCING);
+        retry_pending_clips("boot");
+    }
 
     btn_resync();
     int pending = rec_store_pending_count();
@@ -372,6 +401,7 @@ void app_main(void)
              button_gpio(BTN_RECORD), pending);
 
     TickType_t last_refresh = xTaskGetTickCount();
+    TickType_t last_activity = last_refresh;
     while (true) {
         if (btn_poll_edge(BTN_RECORD)) {
             ensure_screen_on();
@@ -379,20 +409,33 @@ void app_main(void)
             btn_resync();
             pending = rec_store_pending_count();
             show_idle(pending);
-            last_refresh = xTaskGetTickCount();
+            last_refresh = last_activity = xTaskGetTickCount();
         } else if (btn_poll_edge(BTN_SYNC)) {
             ensure_screen_on();
             do_sync(pending);
             btn_resync();
             pending = rec_store_pending_count();
-            last_refresh = xTaskGetTickCount();
+            last_refresh = last_activity = xTaskGetTickCount();
         } else if (btn_poll_edge(BTN_POWER)) {
             s_screen_on = !s_screen_on;
             status_display(s_screen_on);
             ESP_LOGI(TAG, "screen %s", s_screen_on ? "on" : "off");
-        } else if (xTaskGetTickCount() - last_refresh >= pdMS_TO_TICKS(IDLE_REFRESH_MS)) {
-            status_tick_idle();
-            last_refresh = xTaskGetTickCount();
+            last_activity = xTaskGetTickCount();
+        } else {
+            const TickType_t now = xTaskGetTickCount();
+            if (now - last_refresh >= pdMS_TO_TICKS(IDLE_REFRESH_MS)) {
+                status_tick_idle();
+                last_refresh = now;
+            }
+            /* Auto deep sleep after an idle stretch — the big standby win. Wakes
+             * (reboots) on Record/Sync. Disabled when the timeout is 0. */
+            if (CONFIG_OPEN_PLAUD_IDLE_SLEEP_S > 0 &&
+                now - last_activity >= pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_IDLE_SLEEP_S * 1000)) {
+                ESP_LOGI(TAG, "idle %ds - deep sleep (wake on Record/Sync)",
+                         CONFIG_OPEN_PLAUD_IDLE_SLEEP_S);
+                status_backlight(false);
+                power_deep_sleep();   /* resets on wake; does not return */
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(BTN_POLL_MS));
     }

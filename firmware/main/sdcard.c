@@ -8,13 +8,14 @@
 static const char *TAG = "sdcard";
 static sdmmc_card_t *s_card;
 
-esp_err_t sdcard_mount(void)
+esp_err_t sdcard_mount(bool allow_format)
 {
     const esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
-        // Auto-format to FAT on first boot if the card has no FAT volume (e.g. a
-        // blank card, or exFAT on a >32 GB card). Erases the card — fine for a
-        // recordings card.
-        .format_if_mount_failed = true,
+        // Auto-format to FAT only when the caller allows it (cold power-on): a
+        // blank card or exFAT on a >32 GB card mounts fresh. On a deep-sleep
+        // wake the caller passes false so a transient mount glitch never wipes a
+        // card full of recordings.
+        .format_if_mount_failed = allow_format,
         .max_files = 5,
         .allocation_unit_size = 16 * 1024,
     };

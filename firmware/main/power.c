@@ -18,6 +18,8 @@
 #include "power.h"
 #include "board.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
 
 static const char *TAG = "power";
 
@@ -172,3 +174,37 @@ int power_battery_pct(bool *out_charging)
 }
 
 #endif
+
+/* ---- Deep sleep (board-independent) ------------------------------------- */
+
+bool power_woke_from_button(void)
+{
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause == ESP_SLEEP_WAKEUP_EXT1) {
+        ESP_LOGI(TAG, "woke from deep sleep (button)");
+        return true;
+    }
+    if (cause != ESP_SLEEP_WAKEUP_UNDEFINED) {
+        ESP_LOGI(TAG, "woke from deep sleep (cause %d)", (int)cause);
+    }
+    return false;
+}
+
+void power_deep_sleep(void)
+{
+    /* Wake on Record or Sync only — NOT Left (GPIO0): it is the boot strapping
+     * pin, and being held low at the wake-reset would drop the chip into ROM
+     * download mode instead of running the app. EXT1 ANY_LOW + RTC pull-ups so
+     * the pins idle high through sleep and only a press (active-low) wakes. */
+    const int pins[] = { BSP_BTN_RIGHT_GPIO, BSP_BTN_MIDDLE_GPIO };
+    uint64_t mask = 0;
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+        mask |= 1ULL << pins[i];
+        rtc_gpio_pullup_en((gpio_num_t)pins[i]);
+        rtc_gpio_pulldown_dis((gpio_num_t)pins[i]);
+    }
+    esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW);
+    ESP_LOGI(TAG, "entering deep sleep; wake on GPIO%d or GPIO%d",
+             BSP_BTN_RIGHT_GPIO, BSP_BTN_MIDDLE_GPIO);
+    esp_deep_sleep_start();
+}
