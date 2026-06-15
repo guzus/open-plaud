@@ -168,12 +168,16 @@ esp_err_t audio_init(void)
 #if BSP_AUDIO_BACKEND_ES7210
     ESP_RETURN_ON_ERROR(tdm_init(), TAG, "tdm");
     ESP_RETURN_ON_ERROR(codec_init(), TAG, "codec");
+    /* esp_codec_dev_open() (in codec_init) already enabled the shared I2S RX
+     * channel; calling i2s_channel_enable() again returns ESP_ERR_INVALID_STATE
+     * ("already enabled"). So only the PDM path, which has no codec to enable the
+     * channel, enables it explicitly. (Verified on first-board bring-up.) */
 #elif BSP_AUDIO_BACKEND_PDM
     ESP_RETURN_ON_ERROR(pdm_init(), TAG, "pdm");
+    ESP_RETURN_ON_ERROR(i2s_channel_enable(s_rx), TAG, "enable");
 #else
 #error "No audio backend selected"
 #endif
-    ESP_RETURN_ON_ERROR(i2s_channel_enable(s_rx), TAG, "enable");
     ESP_LOGI(
         TAG,
         "audio ready (%s): %d Hz, %d-bit, %d ch",

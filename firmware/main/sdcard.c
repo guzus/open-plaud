@@ -11,7 +11,10 @@ static sdmmc_card_t *s_card;
 esp_err_t sdcard_mount(void)
 {
     const esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
-        .format_if_mount_failed = false,
+        // Auto-format to FAT on first boot if the card has no FAT volume (e.g. a
+        // blank card, or exFAT on a >32 GB card). Erases the card — fine for a
+        // recordings card.
+        .format_if_mount_failed = true,
         .max_files = 5,
         .allocation_unit_size = 16 * 1024,
     };
