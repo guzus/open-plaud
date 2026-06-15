@@ -17,6 +17,7 @@ Two design decisions dominate this module:
    public method under one non-reentrant ``threading.Lock`` (plus WAL and a
    ``busy_timeout``) so a future threaded or multi-worker caller stays safe.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     audio_filename TEXT,
     audio_content_type TEXT,
     audio_size_bytes INTEGER,
+    audio_duration_seconds REAL,
     transcript_text TEXT,
     transcript_language TEXT,
     transcript_segments_json TEXT,
@@ -58,14 +60,14 @@ _UPSERT = """
 INSERT OR REPLACE INTO recordings (
     id, status, created_at,
     audio_path, audio_filename, audio_content_type, audio_size_bytes,
-    transcript_text, transcript_language, transcript_segments_json,
+    audio_duration_seconds, transcript_text, transcript_language, transcript_segments_json,
     diarization_json, summary_json, error
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 _COLUMNS = (
     "id, status, created_at, "
-    "audio_path, audio_filename, audio_content_type, audio_size_bytes, "
+    "audio_path, audio_filename, audio_content_type, audio_size_bytes, audio_duration_seconds, "
     "transcript_text, transcript_language, transcript_segments_json, "
     "diarization_json, summary_json, error"
 )
@@ -150,9 +152,7 @@ class RecordingStore:
     def list(self) -> list[Recording]:
         with self._lock:
             conn = self._connect()
-            cur = conn.execute(
-                f"SELECT {_COLUMNS} FROM recordings ORDER BY created_at DESC"
-            )
+            cur = conn.execute(f"SELECT {_COLUMNS} FROM recordings ORDER BY created_at DESC")
             rows = cur.fetchall()
         return [_from_row(row) for row in rows]
 
@@ -171,18 +171,25 @@ def _as_int(value: object) -> int:
     return value
 
 
+def _as_float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    assert isinstance(value, int | float)
+    return float(value)
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(recordings)")}
     if "transcript_segments_json" not in columns:
         conn.execute("ALTER TABLE recordings ADD COLUMN transcript_segments_json TEXT")
+    if "audio_duration_seconds" not in columns:
+        conn.execute("ALTER TABLE recordings ADD COLUMN audio_duration_seconds REAL")
 
 
 def _to_row(rec: Recording) -> tuple[object, ...]:
     """Flatten a Recording into a parameter tuple for the upsert."""
     transcript_text = rec.transcript.text if rec.transcript is not None else None
-    transcript_language = (
-        rec.transcript.language if rec.transcript is not None else None
-    )
+    transcript_language = rec.transcript.language if rec.transcript is not None else None
     transcript_segments_json = (
         json.dumps(
             [
@@ -199,9 +206,7 @@ def _to_row(rec: Recording) -> tuple[object, ...]:
         else None
     )
 
-    diarization_json = (
-        json.dumps(rec.diarization) if rec.diarization is not None else None
-    )
+    diarization_json = json.dumps(rec.diarization) if rec.diarization is not None else None
 
     if rec.summary is not None:
         # Per the store contract, summary is a Summary dataclass. Narrow with an
@@ -228,6 +233,7 @@ def _to_row(rec: Recording) -> tuple[object, ...]:
         rec.audio.filename,
         rec.audio.content_type,
         rec.audio.size_bytes,
+        rec.audio.duration_seconds,
         transcript_text,
         transcript_language,
         transcript_segments_json,
@@ -247,6 +253,7 @@ def _from_row(row: tuple[object, ...]) -> Recording:
         audio_filename,
         audio_content_type,
         audio_size_bytes,
+        audio_duration_seconds,
         transcript_text,
         transcript_language,
         transcript_segments_json,
@@ -264,21 +271,15 @@ def _from_row(row: tuple[object, ...]) -> Recording:
             segments = [
                 TranscriptSegment(
                     text=str(item["text"]),
-                    start=(
-                        float(item["start"]) if item.get("start") is not None else None
-                    ),
+                    start=(float(item["start"]) if item.get("start") is not None else None),
                     end=float(item["end"]) if item.get("end") is not None else None,
-                    speaker=(
-                        str(item["speaker"]) if item.get("speaker") is not None else None
-                    ),
+                    speaker=(str(item["speaker"]) if item.get("speaker") is not None else None),
                 )
                 for item in raw_segments
             ]
         transcript = Transcript(
             text=str(transcript_text),
-            language=(
-                str(transcript_language) if transcript_language is not None else None
-            ),
+            language=(str(transcript_language) if transcript_language is not None else None),
             segments=segments,
         )
 
@@ -302,10 +303,9 @@ def _from_row(row: tuple[object, ...]) -> Recording:
         audio=AudioRef(
             path=Path(str(audio_path)),
             filename=str(audio_filename),
-            content_type=(
-                str(audio_content_type) if audio_content_type is not None else None
-            ),
+            content_type=(str(audio_content_type) if audio_content_type is not None else None),
             size_bytes=_as_int(audio_size_bytes),
+            duration_seconds=_as_float_or_none(audio_duration_seconds),
         ),
         status=JobStatus(str(status)),
         created_at=datetime.fromisoformat(str(created_at)),

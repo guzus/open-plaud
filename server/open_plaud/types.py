@@ -21,6 +21,7 @@ class AudioRef:
     filename: str
     content_type: str | None
     size_bytes: int
+    duration_seconds: float | None = None
 
 
 @dataclass(slots=True)

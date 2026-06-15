@@ -1,4 +1,5 @@
 """Local Ollama summarization provider."""
+
 from __future__ import annotations
 
 import json
@@ -7,17 +8,19 @@ from typing import Any
 
 import httpx
 
-from open_plaud.summarization.base import register
+from open_plaud.summarization.base import register, transcript_user_message
 from open_plaud.types import ActionItem, Summary, Transcript
 
 _DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 _REQUEST_TIMEOUT = 120.0
 
 _SYSTEM_PROMPT = (
-    "Summarize the transcript as JSON only. Return an object with a string "
-    "`summary` field and an `action_items` array. Each action item must be an "
-    "object with `text`, `owner`, and `due` fields; use null when owner or due "
-    "date is not stated."
+    "Summarize an already-transcribed voice recording as JSON only. Return an "
+    "object with a string `summary` field and an `action_items` array. Each action "
+    "item must be an object with `text`, `owner`, and `due` fields; use null when "
+    "owner or due date is not stated. Never ask for audio or claim that no audio "
+    "or transcript was attached; if the transcript has no usable speech, state "
+    "that no usable speech was transcribed."
 )
 
 
@@ -76,9 +79,7 @@ class OllamaSummarizer:
     ) -> None:
         model = model or os.environ.get("OP_OLLAMA_MODEL")
         if not model:
-            raise RuntimeError(
-                "OP_OLLAMA_MODEL is required for the ollama summarization provider"
-            )
+            raise RuntimeError("OP_OLLAMA_MODEL is required for the ollama summarization provider")
         self._model = model
         self._base_url = (base_url or os.environ.get("OP_OLLAMA_URL") or _DEFAULT_BASE_URL).rstrip(
             "/"
@@ -88,9 +89,7 @@ class OllamaSummarizer:
     async def summarize(
         self, transcript: Transcript, *, instructions: str | None = None
     ) -> Summary:
-        content = transcript.text
-        if instructions:
-            content = f"{content}\n\nAdditional instructions: {instructions}"
+        content = transcript_user_message(transcript, instructions=instructions)
 
         payload: dict[str, Any] = {
             "model": self._model,
@@ -112,8 +111,7 @@ class OllamaSummarizer:
 
         if not response.is_success:
             raise RuntimeError(
-                f"Ollama summarization failed (HTTP {response.status_code}): "
-                f"{response.text}"
+                f"Ollama summarization failed (HTTP {response.status_code}): {response.text}"
             )
 
         data = response.json()

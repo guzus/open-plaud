@@ -30,7 +30,7 @@
   {% if recordings %}
   <table>
     <thead>
-      <tr><th>Recording</th><th>Status</th><th>Created</th><th>Size</th></tr>
+      <tr><th>Recording</th><th>Status</th><th>Created</th><th>Length</th><th>Size</th></tr>
     </thead>
     <tbody>
       {% for r in recordings %}
@@ -38,7 +38,8 @@
         <td><a href="/rec/{{ r.id }}">{{ r.filename }}</a></td>
         <td><span class="status status-{{ r.status.value }}">{{ r.status.value }}</span></td>
         <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-        <td>{{ r.size_bytes }} B</td>
+        <td>{{ format_duration(r.duration_seconds) }}</td>
+        <td>{{ format_bytes(r.size_bytes) }}</td>
       </tr>
       {% endfor %}
     </tbody>

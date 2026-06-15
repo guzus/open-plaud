@@ -5,17 +5,18 @@ from typing import Any
 
 import httpx
 
-from open_plaud.summarization.base import register
+from open_plaud.summarization.base import register, transcript_user_message
 from open_plaud.types import ActionItem, Summary, Transcript
 
 _API_URL = "https://api.anthropic.com/v1/messages"
 _ANTHROPIC_VERSION = "2023-06-01"
 
 _SYSTEM_PROMPT = (
-    "You summarize a transcript of a voice recording. Write a concise summary "
-    "capturing the key points and decisions, and extract any concrete action "
-    "items (with owner and due date when stated). Respond ONLY by calling the "
-    "record_summary tool — do not write any other text."
+    "You summarize an already-transcribed voice recording. Write a concise "
+    "summary capturing the key points and decisions, and extract any concrete "
+    "action items (with owner and due date when stated). Never ask for audio or "
+    "claim that no audio/transcript was attached; if the transcript has no usable "
+    "speech, record that plainly. Respond ONLY by calling the record_summary tool."
 )
 
 # Anthropic tool definition. Forcing structured output through a tool (with
@@ -24,8 +25,7 @@ _SYSTEM_PROMPT = (
 RECORD_SUMMARY_TOOL: dict[str, Any] = {
     "name": "record_summary",
     "description": (
-        "Record the summary of the voice recording transcript and any extracted "
-        "action items."
+        "Record the summary of the voice recording transcript and any extracted action items."
     ),
     "input_schema": {
         "type": "object",
@@ -87,9 +87,7 @@ class ClaudeSummarizer:
     async def summarize(
         self, transcript: Transcript, *, instructions: str | None = None
     ) -> Summary:
-        content = transcript.text
-        if instructions:
-            content = f"{content}\n\nAdditional instructions: {instructions}"
+        content = transcript_user_message(transcript, instructions=instructions)
 
         # Minimal body — no thinking/effort/temperature/top_p/top_k, which 400 on
         # some tiers. This keeps the request compatible across Haiku/Sonnet/Opus.
@@ -108,9 +106,7 @@ class ClaudeSummarizer:
         }
 
         if self._http_client is not None:
-            response = await self._http_client.post(
-                _API_URL, json=payload, headers=headers
-            )
+            response = await self._http_client.post(_API_URL, json=payload, headers=headers)
         else:
             async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(_API_URL, json=payload, headers=headers)
@@ -141,6 +137,4 @@ class ClaudeSummarizer:
                     raise RuntimeError(
                         f"Claude record_summary input was malformed: {inp!r}"
                     ) from exc
-        raise RuntimeError(
-            "Claude response contained no record_summary tool_use block"
-        )
+        raise RuntimeError("Claude response contained no record_summary tool_use block")
