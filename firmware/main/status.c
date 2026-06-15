@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "board.h"
@@ -17,8 +18,16 @@
 #include "freertos/semphr.h"
 #endif
 #include "esp_log.h"
+#include "power.h"
+#include "sdcard.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "status";
+
+/* Shared across LCD + RGB builds so the public API has one source of truth. */
+static open_plaud_status_t s_status = OPEN_PLAUD_STATUS_BOOT;
+static status_info_t s_info = { -1, -1, -1, -1, NULL };
+static char s_clip[20];   /* owns the clip name; callers' pointers may dangle */
 
 #if BSP_HAS_LCD
 #define LCD_HOST SPI2_HOST
@@ -30,26 +39,42 @@ static const char *TAG = "status";
 #define UI_COLOR_HEADER    LCD_RGB565(25, 28, 32)
 #define UI_COLOR_CARD      LCD_RGB565(16, 18, 21)
 #define UI_COLOR_TEXT      LCD_RGB565(242, 244, 248)
-#define UI_COLOR_MUTED     LCD_RGB565(160, 168, 178)
+#define UI_COLOR_MUTED     LCD_RGB565(120, 128, 138)
+#define UI_COLOR_DIM       LCD_RGB565(64, 70, 78)
+#define UI_COLOR_WORDMARK  LCD_RGB565(43, 214, 142)
 #define UI_COLOR_BOOT      LCD_RGB565(52, 137, 255)
 #define UI_COLOR_READY     LCD_RGB565(43, 214, 142)
 #define UI_COLOR_RECORDING LCD_RGB565(255, 64, 88)
-#define UI_COLOR_SYNCING   LCD_RGB565(255, 190, 72)
+#define UI_COLOR_SYNCING   LCD_RGB565(90, 176, 255)
 #define UI_COLOR_DONE      LCD_RGB565(68, 206, 230)
+#define UI_COLOR_SAVED     LCD_RGB565(43, 214, 142)
+#define UI_COLOR_OFFLINE   LCD_RGB565(255, 183, 77)
 #define UI_COLOR_ERROR     LCD_RGB565(255, 82, 180)
+#define UI_COLOR_REC_HINT  LCD_RGB565(255, 79, 163)
+
+/* Layout regions (240x240). Partial redraws target the TIMER and FOOTER bands. */
+#define UI_HINT_Y     0
+#define UI_HINT_H     20
+#define UI_WORD_Y     26
+#define UI_CARD_X     16
+#define UI_CARD_Y     42
+#define UI_CARD_W     (BSP_LCD_H_RES - 32)
+#define UI_CARD_H     150
+#define UI_TITLE_Y    56
+#define UI_TIMER_Y    102
+#define UI_DETAIL_Y   108
+#define UI_SUB_Y      146
+#define UI_BAR_X      (UI_CARD_X + 14)
+#define UI_BAR_W      (UI_CARD_W - 28)
+#define UI_BAR_Y      172
+#define UI_BAR_H      8
+#define UI_FOOTER_Y   212
+#define UI_FOOTER_H   24
 
 static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_lcd_tx_done;
 static bool s_lcd_ready;
-#endif
-
-#if BSP_HAS_LCD
-typedef struct {
-    const char *title;
-    const char *detail;
-    const char *footer;
-    uint16_t accent;
-} status_screen_t;
+static bool s_display_on = true;
 
 typedef struct {
     char ch;
@@ -58,6 +83,11 @@ typedef struct {
 
 static const font_glyph_t FONT5X7[] = {
     { '-', { 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00 } },
+    { '.', { 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C } },
+    { ':', { 0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00 } },
+    { '/', { 0x01, 0x02, 0x04, 0x04, 0x08, 0x10, 0x10 } },
+    { '+', { 0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00 } },
+    { '%', { 0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03 } },
     { '0', { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E } },
     { '1', { 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E } },
     { '2', { 0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F } },
@@ -102,8 +132,10 @@ static uint16_t status_color(open_plaud_status_t status)
     case OPEN_PLAUD_STATUS_BOOT: return UI_COLOR_BOOT;
     case OPEN_PLAUD_STATUS_READY: return UI_COLOR_READY;
     case OPEN_PLAUD_STATUS_RECORDING: return UI_COLOR_RECORDING;
+    case OPEN_PLAUD_STATUS_SAVED: return UI_COLOR_SAVED;
     case OPEN_PLAUD_STATUS_SYNCING: return UI_COLOR_SYNCING;
     case OPEN_PLAUD_STATUS_DONE: return UI_COLOR_DONE;
+    case OPEN_PLAUD_STATUS_OFFLINE: return UI_COLOR_OFFLINE;
     case OPEN_PLAUD_STATUS_ERROR: return UI_COLOR_ERROR;
     }
     return 0xFFFF;
@@ -124,26 +156,6 @@ static bool lcd_color_trans_done_cb(
         xSemaphoreGiveFromISR(sem, &high_task_woken);
     }
     return high_task_woken == pdTRUE;
-}
-
-static status_screen_t status_screen(open_plaud_status_t status)
-{
-    const uint16_t accent = status_color(status);
-    switch (status) {
-    case OPEN_PLAUD_STATUS_BOOT:
-        return (status_screen_t){ "BOOT", "STARTING", "MOUNT SD AND AUDIO", accent };
-    case OPEN_PLAUD_STATUS_READY:
-        return (status_screen_t){ "READY", "HOLD PLUS", "RECORD TO MICROSD", accent };
-    case OPEN_PLAUD_STATUS_RECORDING:
-        return (status_screen_t){ "REC", "RELEASE TO STOP", "CAPTURING WAV", accent };
-    case OPEN_PLAUD_STATUS_SYNCING:
-        return (status_screen_t){ "SYNCING", "UPLOADING", "WAIT FOR SERVER", accent };
-    case OPEN_PLAUD_STATUS_DONE:
-        return (status_screen_t){ "DONE", "SAVED", "CLIP SENT", accent };
-    case OPEN_PLAUD_STATUS_ERROR:
-        return (status_screen_t){ "ERROR", "CHECK SD WIFI", "SEE SERIAL LOG", accent };
-    }
-    return (status_screen_t){ "STATUS", "UNKNOWN", "SEE SERIAL LOG", accent };
 }
 
 static int text_width_px(const char *text, int scale)
@@ -213,11 +225,6 @@ static void lcd_fill_rect(int x, int y, int w, int h, uint16_t color)
     }
 }
 
-static void lcd_fill_screen(uint16_t color)
-{
-    lcd_fill_rect(0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES, color);
-}
-
 static bool font5x7_rows(char ch, uint8_t rows[7])
 {
     memset(rows, 0, 7);
@@ -272,36 +279,215 @@ static void lcd_draw_text(int x, int y, const char *text, int scale, uint16_t fg
     lcd_draw_bitmap_sync(x, y, x + w, y + h, pixels);
 }
 
-static void lcd_draw_text_centered(
-    int y,
-    const char *text,
-    int scale,
-    uint16_t fg,
-    uint16_t bg
-)
+static void lcd_draw_text_centered(int y, const char *text, int scale, uint16_t fg, uint16_t bg)
 {
     const int x = (BSP_LCD_H_RES - text_width_px(text, scale)) / 2;
     lcd_draw_text(x, y, text, scale, fg, bg);
 }
 
-static void lcd_draw_status(open_plaud_status_t status)
+/* ---- button hint row -------------------------------------------------------
+ * Three columns (Left / Middle / Right), aligned under the three top-edge
+ * buttons. Labels are honest: a control that can't be acted on right now (e.g.
+ * Cancel mid-sync, while the upload call blocks) is shown dimmed, never as a
+ * live action. */
+static void draw_hint(int col, const char *txt, uint16_t fg)
 {
-    const status_screen_t screen = status_screen(status);
-    lcd_fill_screen(UI_COLOR_BG);
-    lcd_fill_rect(0, 0, BSP_LCD_H_RES, 34, UI_COLOR_HEADER);
-    lcd_draw_text_centered(10, "OPEN PLAUD", 2, UI_COLOR_TEXT, UI_COLOR_HEADER);
-
-    lcd_fill_rect(16, 50, BSP_LCD_H_RES - 32, 124, UI_COLOR_CARD);
-    lcd_fill_rect(16, 50, BSP_LCD_H_RES - 32, 5, screen.accent);
-    lcd_draw_text_centered(76, screen.title, 4, screen.accent, UI_COLOR_CARD);
-    lcd_draw_text_centered(126, screen.detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
-    lcd_draw_text_centered(154, screen.footer, 1, UI_COLOR_MUTED, UI_COLOR_CARD);
-
-    lcd_fill_rect(24, 194, BSP_LCD_H_RES - 48, 12, UI_COLOR_HEADER);
-    lcd_fill_rect(24, 194, BSP_LCD_H_RES - 48, 12, screen.accent);
-    lcd_fill_rect(0, 224, BSP_LCD_H_RES, 16, screen.accent);
+    const int colw = BSP_LCD_H_RES / 3;
+    const int x = col * colw + (colw - text_width_px(txt, 1)) / 2;
+    lcd_draw_text(x, UI_HINT_Y + 6, txt, 1, fg, UI_COLOR_HEADER);
 }
-#endif
+
+static void draw_hints(open_plaud_status_t status, const status_info_t *info)
+{
+    lcd_fill_rect(0, UI_HINT_Y, BSP_LCD_H_RES, UI_HINT_H, UI_COLOR_HEADER);
+    const bool has_queue = info && info->pending > 0;
+    const uint16_t sync_col = has_queue ? UI_COLOR_SYNCING : UI_COLOR_DIM;
+
+    /* Columns: 0 = Left (power), 1 = Middle (sync), 2 = Right (record). */
+    switch (status) {
+    case OPEN_PLAUD_STATUS_RECORDING:
+        draw_hint(0, "CANCEL", UI_COLOR_RECORDING);
+        draw_hint(1, "-", UI_COLOR_DIM);
+        draw_hint(2, "STOP", UI_COLOR_RECORDING);
+        break;
+    case OPEN_PLAUD_STATUS_SYNCING:
+        draw_hint(0, "-", UI_COLOR_DIM);
+        draw_hint(1, "BUSY", UI_COLOR_MUTED);
+        draw_hint(2, "-", UI_COLOR_DIM);
+        break;
+    case OPEN_PLAUD_STATUS_OFFLINE:
+        draw_hint(0, "PWR", UI_COLOR_MUTED);
+        draw_hint(1, "RETRY", UI_COLOR_SYNCING);
+        draw_hint(2, "REC", UI_COLOR_REC_HINT);
+        break;
+    case OPEN_PLAUD_STATUS_BOOT:
+    case OPEN_PLAUD_STATUS_ERROR:
+        draw_hint(0, "-", UI_COLOR_DIM);
+        draw_hint(1, "-", UI_COLOR_DIM);
+        draw_hint(2, "-", UI_COLOR_DIM);
+        break;
+    default: /* READY / SAVED / DONE */
+        draw_hint(0, "PWR", UI_COLOR_MUTED);
+        draw_hint(1, "SYNC", sync_col);
+        draw_hint(2, "REC", UI_COLOR_REC_HINT);
+        break;
+    }
+}
+
+/* ---- battery + storage footer --------------------------------------------- */
+static void draw_footer(void)
+{
+    lcd_fill_rect(0, UI_FOOTER_Y, BSP_LCD_H_RES, UI_FOOTER_H, UI_COLOR_BG);
+
+    char bat[24];
+    bool charging = false;
+    int pct = power_battery_pct(&charging);
+    if (pct < 0) {
+        snprintf(bat, sizeof bat, "BAT --");
+    } else {
+        snprintf(bat, sizeof bat, "BAT %d%%%s", pct, charging ? "+" : "");
+    }
+
+    char sd[32];
+    uint64_t used = 0, total = 0;
+    if (sdcard_usage(&used, &total) == ESP_OK && total > 0) {
+        unsigned used_tenths = (unsigned)(used / 100000000ULL);          /* 0.1 GB */
+        unsigned total_gb = (unsigned)((total + 500000000ULL) / 1000000000ULL);
+        snprintf(sd, sizeof sd, "SD %u.%u/%uG", used_tenths / 10, used_tenths % 10, total_gb);
+    } else {
+        snprintf(sd, sizeof sd, "SD --");
+    }
+
+    char foot[64];
+    snprintf(foot, sizeof foot, "%s  %s", bat, sd);
+    lcd_draw_text_centered(UI_FOOTER_Y + 6, foot, 1, UI_COLOR_MUTED, UI_COLOR_BG);
+}
+
+static void draw_bar(int filled_pct, uint16_t color)
+{
+    if (filled_pct < 0) {
+        filled_pct = 0;
+    }
+    if (filled_pct > 100) {
+        filled_pct = 100;
+    }
+    lcd_fill_rect(UI_BAR_X, UI_BAR_Y, UI_BAR_W, UI_BAR_H, UI_COLOR_HEADER);
+    const int fw = UI_BAR_W * filled_pct / 100;
+    if (fw > 0) {
+        lcd_fill_rect(UI_BAR_X, UI_BAR_Y, fw, UI_BAR_H, color);
+    }
+}
+
+static void fmt_mmss(int seconds, char *out, size_t n)
+{
+    if (seconds < 0) {
+        seconds = 0;
+    }
+    snprintf(out, n, "%02d:%02d", seconds / 60, seconds % 60);
+}
+
+/* Repaint just the recording timer (and elapsed bar) — the per-second region
+ * touched from inside the capture loop. Small bitmaps only; no full redraw. */
+static void draw_timer(int elapsed_s)
+{
+    char t[8];
+    fmt_mmss(elapsed_s, t, sizeof t);
+    lcd_fill_rect(UI_CARD_X, UI_TIMER_Y, UI_CARD_W, 7 * 4, UI_COLOR_CARD);
+    lcd_draw_text_centered(UI_TIMER_Y, t, 4, UI_COLOR_TEXT, UI_COLOR_CARD);
+
+    int pct = 0;
+    if (CONFIG_OPEN_PLAUD_MAX_REC_SECONDS > 0) {
+        pct = elapsed_s * 100 / CONFIG_OPEN_PLAUD_MAX_REC_SECONDS;
+    }
+    draw_bar(pct, UI_COLOR_RECORDING);
+}
+
+static void lcd_draw_full(open_plaud_status_t status, const status_info_t *info)
+{
+    const uint16_t accent = status_color(status);
+    lcd_fill_rect(0, UI_HINT_H, BSP_LCD_H_RES, BSP_LCD_V_RES - UI_HINT_H, UI_COLOR_BG);
+    draw_hints(status, info);
+    lcd_draw_text_centered(UI_WORD_Y, "OPEN PLAUD", 1, UI_COLOR_WORDMARK, UI_COLOR_BG);
+
+    lcd_fill_rect(UI_CARD_X, UI_CARD_Y, UI_CARD_W, UI_CARD_H, UI_COLOR_CARD);
+    lcd_fill_rect(UI_CARD_X, UI_CARD_Y, UI_CARD_W, 4, accent);
+
+    char detail[32];
+    detail[0] = '\0';
+
+    switch (status) {
+    case OPEN_PLAUD_STATUS_BOOT:
+        lcd_draw_text_centered(UI_TITLE_Y, "BOOT", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, "STARTING", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        break;
+    case OPEN_PLAUD_STATUS_READY:
+        lcd_draw_text_centered(UI_TITLE_Y, "READY", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, "TAP REC", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "PRESS RIGHT TO RECORD", 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        break;
+    case OPEN_PLAUD_STATUS_RECORDING:
+        lcd_draw_text_centered(UI_TITLE_Y, "REC", 4, accent, UI_COLOR_CARD);
+        draw_timer(info ? info->elapsed_s : 0);
+        if (info && info->clip) {
+            lcd_draw_text_centered(UI_SUB_Y, info->clip, 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        }
+        break;
+    case OPEN_PLAUD_STATUS_SAVED:
+        lcd_draw_text_centered(UI_TITLE_Y, "SAVED", 4, accent, UI_COLOR_CARD);
+        if (info && info->pending > 0) {
+            snprintf(detail, sizeof detail, "%d TO SYNC", info->pending);
+        } else {
+            snprintf(detail, sizeof detail, "QUEUED");
+        }
+        lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "PRESS SYNC TO UPLOAD", 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        break;
+    case OPEN_PLAUD_STATUS_SYNCING:
+        lcd_draw_text_centered(UI_TITLE_Y, "SYNCING", 4, accent, UI_COLOR_CARD);
+        if (info && info->sync_total > 0) {
+            snprintf(detail, sizeof detail, "%d OF %d",
+                     info->sync_done < 0 ? 0 : info->sync_done, info->sync_total);
+            lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+            int pct = info->sync_total > 0
+                ? (info->sync_done < 0 ? 0 : info->sync_done) * 100 / info->sync_total
+                : 0;
+            draw_bar(pct, accent);
+        } else {
+            lcd_draw_text_centered(UI_DETAIL_Y, "UPLOADING", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        }
+        if (info && info->clip) {
+            lcd_draw_text_centered(UI_SUB_Y, info->clip, 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        }
+        break;
+    case OPEN_PLAUD_STATUS_DONE:
+        lcd_draw_text_centered(UI_TITLE_Y, "DONE", 4, accent, UI_COLOR_CARD);
+        if (info && info->sync_done > 0) {
+            snprintf(detail, sizeof detail, "%d SENT", info->sync_done);
+        } else {
+            snprintf(detail, sizeof detail, "ALL SYNCED");
+        }
+        lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        break;
+    case OPEN_PLAUD_STATUS_OFFLINE:
+        lcd_draw_text_centered(UI_TITLE_Y, "NO WIFI", 4, accent, UI_COLOR_CARD);
+        if (info && info->pending > 0) {
+            snprintf(detail, sizeof detail, "%d QUEUED", info->pending);
+        } else {
+            snprintf(detail, sizeof detail, "QUEUED");
+        }
+        lcd_draw_text_centered(UI_DETAIL_Y, detail, 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "SYNC POSTPONED", 1, UI_COLOR_OFFLINE, UI_COLOR_CARD);
+        break;
+    case OPEN_PLAUD_STATUS_ERROR:
+        lcd_draw_text_centered(UI_TITLE_Y, "ERROR", 4, accent, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_DETAIL_Y, "CHECK SD WIFI", 1, UI_COLOR_TEXT, UI_COLOR_CARD);
+        lcd_draw_text_centered(UI_SUB_Y, "SEE SERIAL LOG", 1, UI_COLOR_MUTED, UI_COLOR_CARD);
+        break;
+    }
+
+    draw_footer();
+}
+#endif /* BSP_HAS_LCD */
 
 static const char *status_name(open_plaud_status_t status)
 {
@@ -309,8 +495,10 @@ static const char *status_name(open_plaud_status_t status)
     case OPEN_PLAUD_STATUS_BOOT: return "boot";
     case OPEN_PLAUD_STATUS_READY: return "ready";
     case OPEN_PLAUD_STATUS_RECORDING: return "recording";
+    case OPEN_PLAUD_STATUS_SAVED: return "saved";
     case OPEN_PLAUD_STATUS_SYNCING: return "syncing";
     case OPEN_PLAUD_STATUS_DONE: return "done";
+    case OPEN_PLAUD_STATUS_OFFLINE: return "offline";
     case OPEN_PLAUD_STATUS_ERROR: return "error";
     }
     return "unknown";
@@ -332,8 +520,10 @@ static void rgb_show(open_plaud_status_t status)
     case OPEN_PLAUD_STATUS_BOOT: rgb_set(false, false, true); return;
     case OPEN_PLAUD_STATUS_READY: rgb_set(false, true, false); return;
     case OPEN_PLAUD_STATUS_RECORDING: rgb_set(true, false, false); return;
+    case OPEN_PLAUD_STATUS_SAVED: rgb_set(false, true, false); return;
     case OPEN_PLAUD_STATUS_SYNCING: rgb_set(true, true, false); return;
     case OPEN_PLAUD_STATUS_DONE: rgb_set(false, true, true); return;
+    case OPEN_PLAUD_STATUS_OFFLINE: rgb_set(true, true, false); return;
     case OPEN_PLAUD_STATUS_ERROR: rgb_set(true, false, true); return;
     }
 }
@@ -400,6 +590,7 @@ esp_err_t status_init(void)
 
     gpio_set_level(BSP_LCD_BL_GPIO, 1);
     s_lcd_ready = true;
+    s_display_on = true;
     return ESP_OK;
 #elif BSP_HAS_RGB_LED
     const gpio_config_t cfg = {
@@ -419,17 +610,92 @@ esp_err_t status_init(void)
 #endif
 }
 
-void status_show(open_plaud_status_t status)
+void status_update(open_plaud_status_t status, const status_info_t *info)
 {
+    s_status = status;
+    if (info) {
+        s_info = *info;
+        /* Copy the clip name into our own storage: callers pass a pointer into a
+         * stack buffer that dangles once they return. */
+        if (info->clip) {
+            snprintf(s_clip, sizeof s_clip, "%s", info->clip);
+            s_info.clip = s_clip;
+        } else {
+            s_info.clip = NULL;
+        }
+    } else {
+        s_info = (status_info_t){ -1, -1, -1, -1, NULL };
+    }
     ESP_LOGI(TAG, "status: %s", status_name(status));
 #if BSP_HAS_LCD
-    if (!s_lcd_ready || s_panel == NULL) {
+    if (!s_lcd_ready || s_panel == NULL || !s_display_on) {
         return;
     }
-    lcd_draw_status(status);
+    lcd_draw_full(status, &s_info);
 #elif BSP_HAS_RGB_LED
     rgb_show(status);
+#endif
+}
+
+void status_show(open_plaud_status_t status)
+{
+    status_update(status, NULL);
+}
+
+void status_tick_recording(int elapsed_s)
+{
+    s_info.elapsed_s = elapsed_s;
+    if (s_status != OPEN_PLAUD_STATUS_RECORDING) {
+        return;
+    }
+#if BSP_HAS_LCD
+    if (!s_lcd_ready || s_panel == NULL || !s_display_on) {
+        return;
+    }
+    /* Timer only. The footer (battery/storage) is NOT refreshed here on purpose:
+     * this runs on the I2S capture task, and draw_footer() does a vTaskDelay
+     * (battery settle), a FAT free-cluster scan on the same SD bus that is
+     * writing the WAV, and extra SPI blits — enough to overrun the ~90 ms I2S
+     * DMA ring and punch silent gaps into the recording. Battery/storage are
+     * already painted once when the RECORDING screen is drawn; that is enough. */
+    draw_timer(elapsed_s);
+#endif
+}
+
+void status_tick_idle(void)
+{
+#if BSP_HAS_LCD
+    if (!s_lcd_ready || s_panel == NULL || !s_display_on) {
+        return;
+    }
+    switch (s_status) {
+    case OPEN_PLAUD_STATUS_READY:
+    case OPEN_PLAUD_STATUS_SAVED:
+    case OPEN_PLAUD_STATUS_DONE:
+    case OPEN_PLAUD_STATUS_OFFLINE:
+        draw_footer();
+        break;
+    default:
+        break;
+    }
+#endif
+}
+
+void status_display(bool on)
+{
+#if BSP_HAS_LCD
+    if (!s_lcd_ready) {
+        return;
+    }
+    if (on == s_display_on) {
+        return;
+    }
+    s_display_on = on;
+    gpio_set_level(BSP_LCD_BL_GPIO, on ? 1 : 0);
+    if (on) {
+        lcd_draw_full(s_status, &s_info);
+    }
 #else
-    (void)status;
+    (void)on;
 #endif
 }
