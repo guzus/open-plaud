@@ -6,10 +6,10 @@
  * BSP_CHG_STAT_GPIO. ADC1 is used on purpose: ADC2 is shared with Wi-Fi and
  * returns errors while the radio is up (i.e. during upload).
  *
- * UNVERIFIED: the divider ratio and EN polarity are not confirmed against the
- * schematic (same confidence caveat as the buttons in board.h). power_init logs
- * the raw mV so the constants below can be calibrated on real hardware; until
- * then treat the percentage as approximate. An implausible reading degrades to
+ * CALIBRATED on hardware (2026-06-16): the divider is 3:1 (BAT_DIVIDER 3.0) —
+ * the ADC reads ~1374 mV for a ~4.12 V cell on USB. EN (active-high) and the
+ * charge-stat pin behave as assumed. The percent map (3300 mV = 0%, 4200 mV =
+ * 100%) is still a coarse LiPo approximation; an implausible reading degrades to
  * "unknown" (-1) rather than a wrong number.
  *
  * Boards without an ADC battery pin (e.g. the custom Rev A, which has an I2C
@@ -30,7 +30,8 @@ static const char *TAG = "power";
 #include "esp_adc/adc_cali_scheme.h"
 
 /* ---- Calibratable constants (see UNVERIFIED note above) ----------------- */
-#define BAT_DIVIDER          2.0f   /* Vbat = Vadc * BAT_DIVIDER             */
+#define BAT_DIVIDER          3.0f   /* Vbat = Vadc * BAT_DIVIDER; 3:1 divider, */
+                                    /* calibrated on HW 2026-06-16 (adc 1374mV -> 4.12V on USB) */
 #define BAT_EN_ACTIVE_LEVEL  1      /* drive EN to this to connect divider   */
 #define BAT_FULL_MV          4200   /* LiPo full                             */
 #define BAT_EMPTY_MV         3300   /* LiPo empty (under light load)         */

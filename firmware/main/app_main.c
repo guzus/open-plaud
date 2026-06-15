@@ -1,8 +1,10 @@
 /*
  * open-plaud recorder — 3-button firmware.
  *
- * Boot: mount SD -> clip store -> audio/buttons/power/status -> auto-retry any
- * clips a previous run failed to upload (uploads happen on boot if Wi-Fi is up).
+ * Boot: mount SD -> clip store -> buttons/power/status -> auto-retry any clips a
+ * previous run failed to upload (uploads happen on boot if Wi-Fi is up). To cut
+ * idle battery draw, audio is initialized only while a clip records, and Wi-Fi
+ * is stopped after each upload batch.
  * Then poll three top-edge buttons forever:
  *
  *   Right  (record) : tap to start recording, tap again to stop. Stop SAVES the
@@ -94,6 +96,7 @@ static void retry_pending_clips(const char *context)
 {
     bool upload_failed = false;
     int cleared = rec_store_retry_pending(&upload_failed, NULL, NULL);
+    net_upload_shutdown();   /* stop Wi-Fi after the batch to cut idle draw */
     ESP_LOGI(TAG, "%s retry queue: %d pending clip(s) uploaded", context, cleared);
     if (upload_failed) {
         ESP_LOGW(TAG, "%s retry queue not fully drained; clips stay queued on SD",
@@ -139,9 +142,16 @@ static void clip_label(const char *base, char *out, size_t n)
  */
 static record_result_t record_clip(const char *path)
 {
+    /* Audio is powered only for the duration of a clip (idle battery saving). */
+    if (audio_init() != ESP_OK) {
+        ESP_LOGE(TAG, "audio init failed - recording skipped");
+        return REC_FAILED;
+    }
+
     wav_writer_t wav;
     if (wav_open(&wav, path, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITS) != ESP_OK) {
         ESP_LOGE(TAG, "cannot open %s", path);
+        audio_deinit();
         return REC_FAILED;
     }
 
@@ -224,6 +234,8 @@ static record_result_t record_clip(const char *path)
     }
 
     const bool close_ok = (wav_close(&wav) == ESP_OK);
+    audio_deinit();
+
     if (result == REC_CANCELLED || written == 0) {
         remove(path);
         ESP_LOGI(TAG, "%s removed (%s)", path,
@@ -300,6 +312,7 @@ static void do_sync(int pending)
 
     bool failed = false;
     const int uploaded = rec_store_retry_pending(&failed, sync_progress, NULL);
+    net_upload_shutdown();   /* stop Wi-Fi after the batch to cut idle draw */
     ESP_LOGI(TAG, "sync: %d uploaded%s", uploaded, failed ? " (stopped early)" : "");
 
     const int remaining = rec_store_pending_count();
@@ -334,16 +347,9 @@ void app_main(void)
         sdcard_unmount();
         return;
     }
-    if (audio_init() != ESP_OK) {
-        ESP_LOGE(TAG, "audio init failed - halting");
-        status_show(OPEN_PLAUD_STATUS_ERROR);
-        sdcard_unmount();
-        return;
-    }
     if (button_init() != ESP_OK) {
         ESP_LOGE(TAG, "button init failed - halting");
         status_show(OPEN_PLAUD_STATUS_ERROR);
-        audio_deinit();
         sdcard_unmount();
         return;
     }

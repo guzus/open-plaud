@@ -76,6 +76,12 @@ boot), a `button map: LEFT=GPIO0 … MIDDLE=GPIO5 … RIGHT=GPIO4 …` line, the
 
 A recording auto-stops after `OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s).
 
+**Power:** to cut idle draw, audio is initialized only while a clip is recording
+(torn down after the WAV closes) and Wi-Fi is started only for upload work and
+stopped after each batch. The CPU still polls buttons in the ready loop; deep
+sleep + button wake remains a follow-up. Battery % uses a calibrated 3:1 divider
+(`power.c`), and the **Left** button blanks the screen to save the backlight.
+
 ## Layout
 
 | File | Role |
@@ -179,8 +185,9 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Battery % + microSD usage on the LCD (incl. while recording).
 - [x] Retry queue + rotate filenames (`rec_NNNN.wav`, uploaded clips → `/sdcard/sent/`).
 - [x] Make `wifi_connect` re-enterable so uploads can retry within a boot.
+- [x] Power down audio outside recording + stop Wi-Fi after upload (idle draw).
+- [x] Calibrate the battery divider (3:1) so the % reads true (2026-06-16).
 - [x] Flash the 3-button build; confirm button mapping on hardware (2026-06-16).
-- [ ] Calibrate the battery divider (`power.c`) against a meter.
 - [ ] Confirm whether 4-bit SDMMC is reliable, then consider `BSP_SD_WIDTH=4`.
 - [ ] Optional Mac companion client (USB drive / serial / BLE) for off-Wi-Fi sync.
 
