@@ -23,9 +23,7 @@ _ANTHROPIC_BODY: dict[str, object] = {
             "name": "record_summary",
             "input": {
                 "summary": "We discussed X.",
-                "action_items": [
-                    {"text": "email Bob", "owner": "Alice", "due": None}
-                ],
+                "action_items": [{"text": "email Bob", "owner": "Alice", "due": None}],
             },
         }
     ],
@@ -67,6 +65,10 @@ async def test_summarize_sends_forced_tool_choice() -> None:
     assert isinstance(body, dict)
     assert body["tool_choice"] == {"type": "tool", "name": "record_summary"}
     assert body["tools"][0]["name"] == "record_summary"
+    message = body["messages"][0]
+    assert message["role"] == "user"
+    assert "<transcript>\nhello world\n</transcript>" in message["content"]
+    assert "Do not say that an audio file" in message["content"]
     # Minimal body: none of the tier-incompatible knobs should be present.
     for forbidden in ("thinking", "effort", "temperature", "top_p", "top_k"):
         assert forbidden not in body

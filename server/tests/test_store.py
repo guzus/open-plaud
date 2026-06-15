@@ -30,6 +30,7 @@ def _full_recording(rec_id: str = "rec-1") -> Recording:
             filename="rec-1.wav",
             content_type="audio/wav",
             size_bytes=2048,
+            duration_seconds=12.5,
         ),
         status=JobStatus.DONE,
         created_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
@@ -74,6 +75,7 @@ def test_add_get_round_trip(tmp_path: Path) -> None:
     assert loaded.status is JobStatus.DONE
     assert loaded.audio.path == Path("/data/audio/rec-1.wav")
     assert loaded.audio.content_type == "audio/wav"
+    assert loaded.audio.duration_seconds == 12.5
     assert loaded.transcript == Transcript(
         text="hello world",
         language="en",
@@ -86,9 +88,7 @@ def test_add_get_round_trip(tmp_path: Path) -> None:
             )
         ],
     )
-    assert loaded.diarization == {
-        "segments": [{"speaker": "A", "start": 0.0, "end": 1.5}]
-    }
+    assert loaded.diarization == {"segments": [{"speaker": "A", "start": 0.0, "end": 1.5}]}
     assert isinstance(loaded.summary, Summary)
     assert loaded.summary.action_items[1] == ActionItem(text="write tests")
     assert loaded.summary.action_items[1].owner is None

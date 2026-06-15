@@ -12,11 +12,13 @@ State lives in two module-level singletons resolved from config:
 Both are constructed once at import; with the default ``none`` providers nothing
 needs an API key, so import is always safe and tests stay offline.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+import wave
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
@@ -75,6 +77,7 @@ class RecordingResponse(BaseModel):
     status: JobStatus
     filename: str
     size_bytes: int
+    duration_seconds: float | None = None
     created_at: datetime
     transcript: TranscriptResponse | None = None
     summary: SummaryResponse | None = None
@@ -117,6 +120,46 @@ def _audio_media_type(rec: Recording) -> str:
     return _SUFFIX_MEDIA_TYPES.get(rec.audio.path.suffix.lower(), "application/octet-stream")
 
 
+def _audio_duration_seconds(path: Path) -> float | None:
+    if path.suffix.lower() != ".wav":
+        return None
+    try:
+        with wave.open(str(path), "rb") as wav:
+            frame_rate = wav.getframerate()
+            if frame_rate <= 0:
+                return None
+            return wav.getnframes() / frame_rate
+    except (EOFError, wave.Error, OSError):
+        return None
+
+
+def _recording_duration_seconds(rec: Recording) -> float | None:
+    return rec.audio.duration_seconds or _audio_duration_seconds(rec.audio.path)
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "unknown"
+    total_seconds = max(0, round(seconds))
+    minutes, secs = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def _format_bytes(size_bytes: int) -> str:
+    units = ("B", "KB", "MB", "GB")
+    value = float(size_bytes)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} B"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size_bytes} B"
+
+
 def _to_response(rec: Recording) -> RecordingResponse:
     transcript = (
         TranscriptResponse(
@@ -149,6 +192,7 @@ def _to_response(rec: Recording) -> RecordingResponse:
         status=rec.status,
         filename=rec.audio.filename,
         size_bytes=rec.audio.size_bytes,
+        duration_seconds=_recording_duration_seconds(rec),
         created_at=rec.created_at,
         transcript=transcript,
         summary=summary,
@@ -213,6 +257,7 @@ async def create_recording(
             filename=filename,
             content_type=file.content_type,
             size_bytes=size,
+            duration_seconds=_audio_duration_seconds(destination),
         ),
         status=JobStatus.RECEIVED,
     )
@@ -267,6 +312,7 @@ def _render_markdown(rec: Recording) -> str:
         "",
         f"- **Status:** {rec.status.value}",
         f"- **Created:** {rec.created_at.isoformat()}",
+        f"- **Length:** {_format_duration(_recording_duration_seconds(rec))}",
     ]
     if isinstance(rec.summary, Summary):
         lines += ["", "## Summary", "", rec.summary.summary]
@@ -302,7 +348,13 @@ def _render_markdown(rec: Recording) -> str:
 async def index(request: Request) -> HTMLResponse:
     recordings: Iterable[RecordingResponse] = [_to_response(r) for r in store.list()]
     return templates.TemplateResponse(
-        request, "index.html", {"recordings": recordings}
+        request,
+        "index.html",
+        {
+            "recordings": recordings,
+            "format_bytes": _format_bytes,
+            "format_duration": _format_duration,
+        },
     )
 
 
@@ -312,7 +364,13 @@ async def recording_detail(request: Request, recording_id: str) -> HTMLResponse:
     if rec is None:
         raise HTTPException(status_code=404, detail="recording not found")
     return templates.TemplateResponse(
-        request, "recording.html", {"rec": _to_response(rec)}
+        request,
+        "recording.html",
+        {
+            "rec": _to_response(rec),
+            "format_bytes": _format_bytes,
+            "format_duration": _format_duration,
+        },
     )
 
 

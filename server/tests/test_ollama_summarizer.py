@@ -24,9 +24,7 @@ async def test_ollama_summarizer_returns_summary_with_action_items() -> None:
     content = json.dumps(
         {
             "summary": "We discussed the launch.",
-            "action_items": [
-                {"text": "send launch notes", "owner": "Mina", "due": None}
-            ],
+            "action_items": [{"text": "send launch notes", "owner": "Mina", "due": None}],
         }
     )
     async with _client_returning(content) as client:
@@ -53,9 +51,7 @@ async def test_ollama_summarizer_sends_json_chat_request() -> None:
         base_url="http://ollama.test", transport=httpx.MockTransport(handler)
     ) as client:
         summarizer = OllamaSummarizer(model="llama", http_client=client)
-        await summarizer.summarize(
-            Transcript(text="hello"), instructions="Use concise Korean."
-        )
+        await summarizer.summarize(Transcript(text="hello"), instructions="Use concise Korean.")
 
     assert captured["path"] == "/api/chat"
     body = captured["body"]
@@ -64,6 +60,8 @@ async def test_ollama_summarizer_sends_json_chat_request() -> None:
     assert body["stream"] is False
     assert body["format"] == "json"
     assert "Use concise Korean." in body["messages"][1]["content"]
+    assert "<transcript>\nhello\n</transcript>" in body["messages"][1]["content"]
+    assert "Do not say that an audio file" in body["messages"][1]["content"]
 
 
 def test_ollama_summarizer_requires_model(monkeypatch: pytest.MonkeyPatch) -> None:

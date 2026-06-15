@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import wave
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -73,6 +75,16 @@ def _post_wav(client: TestClient, name: str = "rec_0001.wav", data: bytes = b"RI
     return str(response.json()["id"])
 
 
+def _wav_bytes(*, seconds: int = 1, sample_rate: int = 8000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(b"\x00\x00" * sample_rate * seconds)
+    return buf.getvalue()
+
+
 def test_create_recording_stores_upload(tmp_path: Path) -> None:
     client = TestClient(app)
 
@@ -87,6 +99,7 @@ def test_create_recording_stores_upload(tmp_path: Path) -> None:
     assert body["status"] == "received"
     assert body["filename"] == "rec_0001.wav"
     assert body["size_bytes"] == 16
+    assert body["duration_seconds"] is None
 
     stored = store.get(body["id"])
     assert stored is not None
@@ -196,6 +209,29 @@ def test_index_and_detail_pages_render() -> None:
     assert "meeting.wav" in detail.text
 
 
+def test_recording_duration_is_returned_and_rendered() -> None:
+    client = TestClient(app)
+    rid = _post_wav(client, name="one-second.wav", data=_wav_bytes(seconds=1))
+
+    got = client.get(f"/v1/recordings/{rid}")
+    assert got.status_code == 200
+    assert got.json()["duration_seconds"] == 1.0
+
+    listing = client.get("/v1/recordings")
+    assert listing.status_code == 200
+    listed = next(item for item in listing.json() if item["id"] == rid)
+    assert listed["duration_seconds"] == 1.0
+
+    index = client.get("/")
+    assert index.status_code == 200
+    assert "<th>Length</th>" in index.text
+    assert "0:01" in index.text
+
+    md = client.get(f"/v1/recordings/{rid}/export.md")
+    assert md.status_code == 200
+    assert "- **Length:** 0:01" in md.text
+
+
 def test_audio_download_returns_bytes() -> None:
     client = TestClient(app)
     rid = _post_wav(client, data=b"RIFFpayload")
@@ -209,9 +245,7 @@ def test_audio_download_is_attachment_with_safe_type() -> None:
     # A malicious upload content-type must never be reflected back as html; the
     # response must be an attachment served as a known audio type.
     client = TestClient(app)
-    response = client.post(
-        "/v1/recordings", files={"file": ("x.wav", b"RIFFdata", "text/html")}
-    )
+    response = client.post("/v1/recordings", files={"file": ("x.wav", b"RIFFdata", "text/html")})
     rid = response.json()["id"]
 
     audio = client.get(f"/v1/recordings/{rid}/audio")
@@ -245,9 +279,7 @@ def test_full_pipeline_produces_transcript_and_summary(
     assert got["transcript"] == {
         "text": "hello world",
         "language": "en",
-        "segments": [
-            {"text": "hello world", "start": 0.0, "end": 1.5, "speaker": None}
-        ],
+        "segments": [{"text": "hello world", "start": 0.0, "end": 1.5, "speaker": None}],
     }
     assert got["summary"]["summary"] == "A concise summary."
     assert got["summary"]["action_items"][0] == {

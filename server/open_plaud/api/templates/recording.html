@@ -32,7 +32,8 @@
   <p class="meta">
     <span class="status status-{{ rec.status.value }}">{{ rec.status.value }}</span>
     &middot; {{ rec.created_at.strftime('%Y-%m-%d %H:%M') }}
-    &middot; {{ rec.size_bytes }} B
+    &middot; {{ format_duration(rec.duration_seconds) }}
+    &middot; {{ format_bytes(rec.size_bytes) }}
   </p>
 
   <audio controls src="/v1/recordings/{{ rec.id }}/audio"></audio>
