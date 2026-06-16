@@ -31,6 +31,32 @@ menu "open-plaud"
         help
             Wi-Fi password. Leave empty only for an open network.
 
+    config OPEN_PLAUD_WIFI2_SSID
+        string "Wi-Fi SSID 2"
+        default ""
+        help
+            Optional second Wi-Fi network. The recorder tries the last
+            successful configured network first, then falls back through the
+            remaining configured networks.
+
+    config OPEN_PLAUD_WIFI2_PASSWORD
+        string "Wi-Fi password 2"
+        default ""
+        help
+            Password for Wi-Fi SSID 2. Leave empty only for an open network.
+
+    config OPEN_PLAUD_WIFI3_SSID
+        string "Wi-Fi SSID 3"
+        default ""
+        help
+            Optional third Wi-Fi network.
+
+    config OPEN_PLAUD_WIFI3_PASSWORD
+        string "Wi-Fi password 3"
+        default ""
+        help
+            Password for Wi-Fi SSID 3. Leave empty only for an open network.
+
     config OPEN_PLAUD_SERVER_URL
         string "Server base URL"
         default "http://192.168.4.2:8000"
@@ -51,6 +77,16 @@ menu "open-plaud"
         int "Wi-Fi reconnect attempts"
         default 5
         range 1 20
+
+    config OPEN_PLAUD_WIFI_CONNECT_TIMEOUT_MS
+        int "Wi-Fi per-network connect timeout in milliseconds"
+        default 8000
+        range 2000 60000
+        help
+            Maximum time spent trying one configured Wi-Fi network before
+            falling back to the next configured network. Keep this shorter than
+            the total upload timeout so Sync can fail fast when a known AP is
+            out of range.
 
     config OPEN_PLAUD_UPLOAD_TIMEOUT_MS
         int "Upload timeout in milliseconds"

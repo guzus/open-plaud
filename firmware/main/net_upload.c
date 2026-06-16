@@ -11,12 +11,22 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "nvs.h"
 
 static const char *TAG = "net_upload";
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 #define UPLOAD_CHUNK_BYTES 4096
+#define WIFI_PROFILE_MAX   3
+#define NVS_NS_NET         "open_plaud"
+#define NVS_KEY_WIFI_SLOT  "wifi_slot"
+
+typedef struct {
+    int slot;
+    const char *ssid;
+    const char *password;
+} wifi_profile_t;
 
 static EventGroupHandle_t s_wifi_events;
 static esp_netif_t *s_wifi_netif;
@@ -27,7 +37,9 @@ static bool s_wifi_handler_registered;
 static bool s_ip_handler_registered;
 static bool s_wifi_initialized;
 static bool s_wifi_started;
+static bool s_wifi_suppress_reconnect;
 static int s_retry_count;
+static int s_active_wifi_slot;
 static char s_upload_chunk[UPLOAD_CHUNK_BYTES];
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
@@ -43,6 +55,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
         }
         int reason = event_data ? ((wifi_event_sta_disconnected_t *)event_data)->reason : -1;
+        if (s_wifi_suppress_reconnect) {
+            ESP_LOGI(TAG, "Wi-Fi disconnected intentionally (reason %d)", reason);
+            return;
+        }
         if (s_retry_count < CONFIG_OPEN_PLAUD_WIFI_MAX_RETRIES) {
             s_retry_count++;
             /* reason 201 = NO_AP_FOUND (wrong SSID/band/range); 15 = handshake
@@ -55,7 +71,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "Wi-Fi connected: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Wi-Fi slot %d connected: " IPSTR,
+                 s_active_wifi_slot, IP2STR(&event->ip_info.ip));
         s_retry_count = 0;
         xEventGroupClearBits(s_wifi_events, WIFI_FAIL_BIT);
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
@@ -64,8 +81,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
 static esp_err_t wifi_init_once(void)
 {
-    if (strlen(CONFIG_OPEN_PLAUD_WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "Wi-Fi SSID is empty; configure it with idf.py menuconfig");
+    if (strlen(CONFIG_OPEN_PLAUD_WIFI_SSID) == 0 &&
+        strlen(CONFIG_OPEN_PLAUD_WIFI2_SSID) == 0 &&
+        strlen(CONFIG_OPEN_PLAUD_WIFI3_SSID) == 0) {
+        ESP_LOGW(TAG, "no Wi-Fi SSID configured; configure one with idf.py menuconfig");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -118,19 +137,123 @@ static esp_err_t wifi_init_once(void)
         s_ip_handler_registered = true;
     }
 
-    wifi_config_t wifi_cfg = { 0 };
-    snprintf((char *)wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), "%s",
-             CONFIG_OPEN_PLAUD_WIFI_SSID);
-    snprintf((char *)wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), "%s",
-             CONFIG_OPEN_PLAUD_WIFI_PASSWORD);
-    wifi_cfg.sta.threshold.authmode =
-        strlen(CONFIG_OPEN_PLAUD_WIFI_PASSWORD) == 0 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
-    wifi_cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "wifi_mode");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg), TAG, "wifi_config");
     s_wifi_initialized = true;
     return ESP_OK;
+}
+
+static int wifi_load_profiles(wifi_profile_t out[WIFI_PROFILE_MAX])
+{
+    int count = 0;
+    if (strlen(CONFIG_OPEN_PLAUD_WIFI_SSID) > 0) {
+        out[count++] = (wifi_profile_t){
+            .slot = 1,
+            .ssid = CONFIG_OPEN_PLAUD_WIFI_SSID,
+            .password = CONFIG_OPEN_PLAUD_WIFI_PASSWORD,
+        };
+    }
+    if (strlen(CONFIG_OPEN_PLAUD_WIFI2_SSID) > 0) {
+        out[count++] = (wifi_profile_t){
+            .slot = 2,
+            .ssid = CONFIG_OPEN_PLAUD_WIFI2_SSID,
+            .password = CONFIG_OPEN_PLAUD_WIFI2_PASSWORD,
+        };
+    }
+    if (strlen(CONFIG_OPEN_PLAUD_WIFI3_SSID) > 0) {
+        out[count++] = (wifi_profile_t){
+            .slot = 3,
+            .ssid = CONFIG_OPEN_PLAUD_WIFI3_SSID,
+            .password = CONFIG_OPEN_PLAUD_WIFI3_PASSWORD,
+        };
+    }
+    return count;
+}
+
+static int wifi_last_success_slot(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NS_NET, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        return 0;
+    }
+    uint8_t slot = 0;
+    err = nvs_get_u8(nvs, NVS_KEY_WIFI_SLOT, &slot);
+    nvs_close(nvs);
+    return err == ESP_OK ? (int)slot : 0;
+}
+
+static void wifi_save_success_slot(int slot)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NS_NET, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "cannot save Wi-Fi slot: %s", esp_err_to_name(err));
+        return;
+    }
+    err = nvs_set_u8(nvs, NVS_KEY_WIFI_SLOT, (uint8_t)slot);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "cannot commit Wi-Fi slot: %s", esp_err_to_name(err));
+    }
+    nvs_close(nvs);
+}
+
+static esp_err_t wifi_try_profile(const wifi_profile_t *profile)
+{
+    if (s_wifi_started) {
+        s_wifi_suppress_reconnect = true;
+        esp_err_t err = esp_wifi_disconnect();
+        if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
+            ESP_LOGW(TAG, "Wi-Fi disconnect before profile switch failed: %s",
+                     esp_err_to_name(err));
+        }
+        err = esp_wifi_stop();
+        s_wifi_suppress_reconnect = false;
+        if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED) {
+            ESP_RETURN_ON_ERROR(err, TAG, "wifi_stop");
+        }
+        s_wifi_started = false;
+    }
+
+    wifi_config_t wifi_cfg = { 0 };
+    snprintf((char *)wifi_cfg.sta.ssid, sizeof(wifi_cfg.sta.ssid), "%s",
+             profile->ssid);
+    snprintf((char *)wifi_cfg.sta.password, sizeof(wifi_cfg.sta.password), "%s",
+             profile->password);
+    wifi_cfg.sta.threshold.authmode =
+        strlen(profile->password) == 0 ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+    wifi_cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+
+    xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    s_retry_count = 0;
+    s_active_wifi_slot = profile->slot;
+
+    ESP_LOGI(TAG, "trying Wi-Fi slot %d (%s)", profile->slot, profile->ssid);
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg), TAG, "wifi_config");
+
+    if (!s_wifi_started) {
+        ESP_LOGI(TAG, "starting Wi-Fi STA");
+        ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi_start");
+        s_wifi_started = true;
+    }
+
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_events,
+                                           WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+                                           pdFALSE, pdFALSE,
+                                           pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_WIFI_CONNECT_TIMEOUT_MS));
+    if (bits & WIFI_CONNECTED_BIT) {
+        wifi_save_success_slot(profile->slot);
+        return ESP_OK;
+    }
+    if ((bits & WIFI_FAIL_BIT) == 0) {
+        ESP_LOGW(TAG, "Wi-Fi slot %d timed out after %d ms",
+                 profile->slot, CONFIG_OPEN_PLAUD_WIFI_CONNECT_TIMEOUT_MS);
+        return ESP_ERR_TIMEOUT;
+    }
+    ESP_LOGW(TAG, "Wi-Fi slot %d failed", profile->slot);
+    return ESP_FAIL;
 }
 
 static esp_err_t wifi_connect(void)
@@ -142,31 +265,38 @@ static esp_err_t wifi_connect(void)
         return ESP_OK;
     }
 
-    xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-    s_retry_count = 0;
-
-    if (!s_wifi_started) {
-        ESP_LOGI(TAG, "starting Wi-Fi STA");
-        ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi_start");
-        s_wifi_started = true;
-    } else {
-        ESP_LOGI(TAG, "reconnecting Wi-Fi STA");
-        ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "wifi_connect");
+    wifi_profile_t profiles[WIFI_PROFILE_MAX];
+    const int profile_count = wifi_load_profiles(profiles);
+    if (profile_count <= 0) {
+        return ESP_ERR_INVALID_ARG;
     }
 
-    bits = xEventGroupWaitBits(s_wifi_events,
-                               WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-                               pdFALSE, pdFALSE,
-                               pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_UPLOAD_TIMEOUT_MS));
-    if (bits & WIFI_CONNECTED_BIT) {
-        return ESP_OK;
+    esp_err_t last_err = ESP_FAIL;
+    const int last_slot = wifi_last_success_slot();
+    if (last_slot > 0) {
+        for (int i = 0; i < profile_count; i++) {
+            if (profiles[i].slot == last_slot) {
+                last_err = wifi_try_profile(&profiles[i]);
+                if (last_err == ESP_OK) {
+                    return ESP_OK;
+                }
+                break;
+            }
+        }
     }
-    if ((bits & WIFI_FAIL_BIT) == 0) {
-        ESP_LOGW(TAG, "Wi-Fi connect timed out after %d ms",
-                 CONFIG_OPEN_PLAUD_UPLOAD_TIMEOUT_MS);
-        return ESP_ERR_TIMEOUT;
+
+    for (int i = 0; i < profile_count; i++) {
+        if (profiles[i].slot == last_slot) {
+            continue;
+        }
+        last_err = wifi_try_profile(&profiles[i]);
+        if (last_err == ESP_OK) {
+            return ESP_OK;
+        }
     }
-    return ESP_FAIL;
+
+    s_active_wifi_slot = 0;
+    return last_err;
 }
 
 void net_upload_shutdown(void)
@@ -179,12 +309,14 @@ void net_upload_shutdown(void)
         xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     }
 
+    s_wifi_suppress_reconnect = true;
     esp_err_t err = esp_wifi_disconnect();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT) {
         ESP_LOGW(TAG, "Wi-Fi disconnect before stop failed: %s", esp_err_to_name(err));
     }
 
     err = esp_wifi_stop();
+    s_wifi_suppress_reconnect = false;
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED) {
         ESP_LOGW(TAG, "Wi-Fi stop failed: %s", esp_err_to_name(err));
         return;
@@ -192,6 +324,7 @@ void net_upload_shutdown(void)
 
     s_wifi_started = false;
     s_retry_count = 0;
+    s_active_wifi_slot = 0;
     ESP_LOGI(TAG, "Wi-Fi STA stopped");
 }
 
