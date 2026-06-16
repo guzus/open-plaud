@@ -56,3 +56,6 @@ sdkconfig.old
 *.swp
 .idea/
 .vscode/
+
+# Claude Code (agent worktrees + local session artifacts)
+.claude/
