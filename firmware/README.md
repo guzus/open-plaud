@@ -74,6 +74,13 @@ boot), a `button map: LEFT=GPIO0 … MIDDLE=GPIO5 … RIGHT=GPIO4 …` line, the
 - **Left** toggles the screen when idle, and **cancels** (discards) the current
   clip while recording.
 
+Up to three Wi-Fi networks can be configured in menuconfig. Slot 1 is the
+original `OPEN_PLAUD_WIFI_SSID` / `OPEN_PLAUD_WIFI_PASSWORD` pair; slots 2 and 3
+are optional. Sync tries the last successful slot first, saves that slot in NVS,
+then falls back through the other configured slots with
+`OPEN_PLAUD_WIFI_CONNECT_TIMEOUT_MS` per network. Clips remain queued on the SD
+card if every network fails.
+
 A recording auto-stops after `OPEN_PLAUD_MAX_REC_SECONDS` (default 1800 s).
 
 **Power:** to cut draw, audio is initialized only while a clip is recording (torn
@@ -120,8 +127,10 @@ Content-Type: multipart/form-data
 Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 
 - `OPEN_PLAUD_BOARD_WAVESHARE_LCD154` / `OPEN_PLAUD_BOARD_CUSTOM_REV_A`
-- `OPEN_PLAUD_WIFI_SSID`
-- `OPEN_PLAUD_WIFI_PASSWORD`
+- `OPEN_PLAUD_WIFI_SSID` / `OPEN_PLAUD_WIFI_PASSWORD`
+- `OPEN_PLAUD_WIFI2_SSID` / `OPEN_PLAUD_WIFI2_PASSWORD` (optional fallback)
+- `OPEN_PLAUD_WIFI3_SSID` / `OPEN_PLAUD_WIFI3_PASSWORD` (optional fallback)
+- `OPEN_PLAUD_WIFI_CONNECT_TIMEOUT_MS` (per-network fallback timeout)
 - `OPEN_PLAUD_SERVER_URL` (base URL, for example `http://192.168.1.50:8000`)
 - `OPEN_PLAUD_WIFI_MAX_RETRIES`
 - `OPEN_PLAUD_UPLOAD_TIMEOUT_MS`
