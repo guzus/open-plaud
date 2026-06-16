@@ -37,7 +37,7 @@ menu "open-plaud"
         help
             Base URL for the open-plaud server, without a trailing slash.
             Example: http://192.168.1.50:8000 (LAN) or
-            https://ingest-production-4fd2.up.railway.app (Railway, needs TLS).
+            https://openplaud.guzus.xyz (Railway, needs TLS).
 
     config OPEN_PLAUD_AUTH_TOKEN
         string "Server auth bearer token"

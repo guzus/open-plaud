@@ -114,7 +114,7 @@ UserDefaults, which keeps it safe for CI and headless verification.
 BIN=.build/debug/openplaud           # after `swift build`
 
 # Liveness probe
-$BIN health --url https://ingest-production-4fd2.up.railway.app
+$BIN health --url https://openplaud.guzus.xyz
 
 # Generate a device-format test WAV (16 kHz/16-bit/stereo)
 $BIN make-wav --out /tmp/rec_0001.wav
@@ -124,7 +124,7 @@ $BIN scan --folder /Volumes/SD16G
 
 # Upload queued clips (idempotent; re-runs skip already-synced)
 $BIN sync --folder /Volumes/SD16G \
-          --url https://ingest-production-4fd2.up.railway.app \
+          --url https://openplaud.guzus.xyz \
           --token "$OPEN_PLAUD_TOKEN" \
           --concurrency 3
 

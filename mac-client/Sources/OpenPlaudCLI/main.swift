@@ -15,7 +15,7 @@ import OpenPlaudCore
 //
 // Token can also come from $OPEN_PLAUD_TOKEN; URL from $OPEN_PLAUD_URL.
 
-let defaultURL = "https://ingest-production-4fd2.up.railway.app"
+let defaultURL = "https://openplaud.guzus.xyz"
 
 func env(_ k: String) -> String? {
     guard let v = ProcessInfo.processInfo.environment[k], !v.isEmpty else { return nil }
