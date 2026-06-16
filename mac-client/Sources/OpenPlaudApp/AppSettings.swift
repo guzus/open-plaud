@@ -9,7 +9,7 @@ final class AppSettings: ObservableObject {
         static let folderBookmark = "folderBookmark" // security-scoped bookmark data
     }
 
-    static let defaultServerURL = "https://ingest-production-4fd2.up.railway.app"
+    static let defaultServerURL = "https://openplaud.guzus.xyz"
 
     @Published var serverURLString: String {
         didSet { UserDefaults.standard.set(serverURLString, forKey: Keys.serverURL) }

@@ -6,7 +6,7 @@ is set), **summarizes the transcript via Fireworks (Kimi)** (when
 `FIREWORKS_API_KEY` is set), and serves both — plus a small web UI with an audio player and Markdown
 export. A cheap, single-binary cloud endpoint on Railway for the PoC.
 
-Live PoC: **https://ingest-production-4fd2.up.railway.app**
+Live PoC: **https://openplaud.guzus.xyz**
 
 ## Endpoints
 
@@ -130,7 +130,7 @@ The recorder is configured in `firmware` via `idf.py menuconfig` →
 - **LAN (no firmware change):** `http://<your-mac-ip>:8000` running `../server`
   or this server locally. Best for first-board bring-up — plain HTTP, fewest
   variables to debug.
-- **Railway (HTTPS — needs a firmware change):** `https://ingest-production-4fd2.up.railway.app`.
+- **Railway (HTTPS — needs a firmware change):** `https://openplaud.guzus.xyz`.
   `esp_http_client` in `firmware/main/net_upload.c` is created with **no TLS cert
   bundle**, so an HTTPS upload will fail the handshake. To enable it:
 
