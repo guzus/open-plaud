@@ -82,13 +82,23 @@ menu "open-plaud"
             forever on a wedged DMA/clock path.
 
     config OPEN_PLAUD_IDLE_SLEEP_S
-        int "Idle seconds before deep sleep (0 = never sleep)"
-        default 60
+        int "Idle seconds before deep sleep (0 = never sleep) [OPT-IN]"
+        default 0
         range 0 3600
         help
             After this many seconds with no button press in the ready/idle
             screen, the device enters deep sleep and wakes on a Record or Sync
-            press (a reset/reboot, ~2 s back to ready). 0 disables auto sleep.
+            press (~2 s back to ready). 0 = NEVER auto-sleep (the default).
+
+            Deep sleep is OPT-IN on the Waveshare board for a hard reason: it
+            powers down the USB-Serial/JTAG, and a deep-sleep WAKE does not bring
+            it back (only a full reset/power-cycle does). This board has no reset
+            button, so once it deep-sleeps it becomes un-reflashable AND
+            un-USB-recognizable until the battery is power-cycled. Only set > 0 if
+            you accept that, or on a board with a reset button, or once a
+            USJ-restore-on-wake fix lands. Other power savings (audio only while
+            recording, Wi-Fi off after upload, screen blank while recording) stay
+            on regardless.
 
     config OPEN_PLAUD_REC_SCREEN_S
         int "Seconds before the screen blanks while recording (0 = never)"

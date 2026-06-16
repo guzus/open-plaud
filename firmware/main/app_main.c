@@ -427,17 +427,22 @@ void app_main(void)
                 status_tick_idle();
                 last_refresh = now;
             }
-            /* Auto deep sleep after an idle stretch — the big standby win. Wakes
-             * (reboots) on Record/Sync. Skipped while charging/USB-powered so the
-             * device stays awake + USB-recognizable when plugged into a computer.
-             * Disabled when the timeout is 0. */
-            if (CONFIG_OPEN_PLAUD_IDLE_SLEEP_S > 0 && !power_is_charging() &&
+            /* Auto deep sleep after an idle stretch. OPT-IN: compiled out entirely
+             * when OPEN_PLAUD_IDLE_SLEEP_S is 0 (the default — see the board caveat
+             * in Kconfig: deep sleep kills the USB-Serial/JTAG and there's no reset
+             * button to recover). Skipped while charging/USB-powered so the device
+             * stays awake + USB-recognizable when plugged into a computer. */
+#if CONFIG_OPEN_PLAUD_IDLE_SLEEP_S > 0
+            if (!power_is_charging() &&
                 now - last_activity >= pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_IDLE_SLEEP_S * 1000)) {
                 ESP_LOGI(TAG, "idle %ds - deep sleep (wake on Record/Sync)",
                          CONFIG_OPEN_PLAUD_IDLE_SLEEP_S);
                 status_backlight(false);
                 power_deep_sleep();   /* resets on wake; does not return */
             }
+#else
+            (void)last_activity;   /* deep sleep disabled — last_activity unused */
+#endif
         }
         vTaskDelay(pdMS_TO_TICKS(BTN_POLL_MS));
     }
