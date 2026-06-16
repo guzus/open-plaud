@@ -45,6 +45,12 @@ final class AppSettings: ObservableObject {
 
     // MARK: - Security-scoped folder bookmark (so a sandboxed app keeps access)
 
+    // TODO(sandbox): `.withSecurityScope` bookmarks require the App Sandbox +
+    // `com.apple.security.files.user-selected.read-write`. In the current
+    // non-sandboxed `swift build` binary `bookmarkData(...)` throws and the
+    // `try?` below swallows it, so a hand-picked folder is NOT remembered across
+    // launches (the manual choice survives only within a session, in memory).
+    // Once the app ships as a signed, sandboxed `.app`, this persists correctly.
     func saveFolderBookmark(_ url: URL) {
         if let data = try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil) {
             UserDefaults.standard.set(data, forKey: Keys.folderBookmark)
@@ -56,5 +62,10 @@ final class AppSettings: ObservableObject {
         var stale = false
         let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale)
         return url
+    }
+
+    /// Forget a hand-picked folder so the app falls back to device auto-detection.
+    func clearFolderBookmark() {
+        UserDefaults.standard.removeObject(forKey: Keys.folderBookmark)
     }
 }

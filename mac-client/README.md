@@ -11,14 +11,16 @@ manage the server URL and auth token in one place.
 
 ## v1 = folder / SD-card sync (no firmware changes)
 
-v1 reads clips as files from a **folder or a mounted volume** you choose:
+v1 reads clips as files from a **folder or a mounted volume**:
 
-- Insert the device's microSD card → it mounts as a volume → point the app at it.
+- Insert the device's microSD card → it mounts as a volume → the app
+  **auto-detects it** and shows "Device connected", no folder-picking needed.
 - Or point the app at any folder that contains `rec_*.wav` clips.
 
 This deliberately needs **zero firmware changes** and works whether clips arrive
 via SD removal today, or via a future "device exposes its SD as a USB drive"
-(USB-MSC) firmware step — same code path either way.
+(USB-MSC) firmware step — same code path either way (a USB-exposed SD is just
+another mounted volume, and the same content-based detection lights up).
 
 ### Why folder/SD sync for v1 (premise check)
 
@@ -32,9 +34,20 @@ correct v1.** See the roadmap below for the wired-in / wireless options.
 
 ## What it does
 
+- **Auto-detect the device**: the app watches for volumes mounting/unmounting
+  (via the **DiskArbitration** framework, with a 2 s poll fallback) and
+  recognizes the open-plaud card by **content** — an external volume whose root
+  (or `sent/` subdir) holds `rec_*.wav` clips. Detection is content-based, not
+  name- or USB-ID-based, so the *same code* recognizes an SD in a card reader
+  today and a future USB-MSC drive from the device. When found, the UI shows
+  **"Device connected — <volume>, N clips (M to sync)"** and auto-selects it as
+  the sync source; on eject it returns to the empty state. A folder you pick by
+  hand is never clobbered by auto-detect (a "Use Device" button lets you switch).
 - **Scan**: recursively finds `rec_*.wav` (case-insensitive) under the chosen
   folder/volume. For each clip it shows filename, size, **duration** (parsed from
   the WAV header), and **sync state**: `queued` / `syncing` / `synced` / `failed`.
+  Clips the device already uploaded over Wi-Fi (which it moves into a top-level
+  `sent/` directory) are **skipped**, so plugging in a card never re-uploads them.
 - **Sync**: uploads queued clips to `POST {base}/v1/recordings` as
   `multipart/form-data`, field name **`file`**, part `Content-Type: audio/wav` —
   byte-for-byte the same contract the device uses. Uploads are:
@@ -61,7 +74,8 @@ mac-client/
     ├── OpenPlaudCore/                     # testable core library (no SwiftUI, no Keychain)
     │   ├── WAV.swift                      #   WAV header parse (duration) + minimal WAV writer
     │   ├── Clip.swift                     #   Clip model + ClipIdentity (idempotency key)
-    │   ├── ClipScanner.swift              #   recursive rec_*.wav scan + state hydration
+    │   ├── ClipScanner.swift              #   recursive rec_*.wav scan (skips sent/) + state hydration
+    │   ├── DeviceDetector.swift           #   pure, shallow "is this an open-plaud volume?" + volume enum
     │   ├── SyncStateStore.swift           #   durable JSON synced-state store (shared CLI+GUI)
     │   ├── Multipart.swift                #   multipart/form-data body (field "file", audio/wav)
     │   ├── ServerModels.swift             #   tolerant decode of the server's Recording JSON
@@ -69,12 +83,13 @@ mac-client/
     │   ├── SyncEngine.swift               #   concurrency-limited, retrying, idempotent sync
     │   └── SelfTest.swift                 #   framework-free unit checks (see Testing below)
     ├── OpenPlaudCLI/                       # headless CLI for verification + scripted syncs
-    │   └── main.swift                      #   openplaud {health,scan,sync,make-wav,selftest}
+    │   └── main.swift                      #   openplaud {health,detect,scan,sync,make-wav,selftest}
     └── OpenPlaudApp/                       # SwiftUI app — UI + wiring only
         ├── OpenPlaudApp.swift             #   @main App + Settings scene
-        ├── ContentView.swift              #   clip list, status pills, "Sync N clips", empty state
+        ├── ContentView.swift              #   "Device connected" banner, clip list, pills, empty state
+        ├── DeviceWatcher.swift            #   DiskArbitration mount/unmount watcher (App-only)
         ├── SettingsView.swift             #   server URL + token (write-only) UI
-        ├── AppModel.swift                 #   ObservableObject bridging views ↔ core engine
+        ├── AppModel.swift                 #   ObservableObject bridging views ↔ core engine + detection
         ├── AppSettings.swift              #   URL in UserDefaults, token via Keychain
         └── Keychain.swift                 #   generic-password Keychain wrapper for the token
 ```
@@ -100,7 +115,10 @@ swift build            # builds OpenPlaudCore, the CLI (openplaud), and the app
 swift run OpenPlaudApp
 ```
 
-1. **Choose Folder or SD Card…** — pick the mounted microSD or any folder of clips.
+1. **Insert the device's microSD** (or plug in the device) — it mounts, the app
+   auto-detects it, and the **"Device connected"** banner appears with the live
+   clip count. No folder-picking required. (You can still **Choose a folder…**
+   for arbitrary clip folders.)
 2. Open **Settings** (gear / ⌘,) → set the **Server base URL** and paste your
    **auth token** (saved to the Keychain). Use **Test Connection** to confirm.
 3. Click **Sync N clips** (⌘S). Watch each row go `queued → syncing → synced`.
@@ -116,10 +134,13 @@ BIN=.build/debug/openplaud           # after `swift build`
 # Liveness probe
 $BIN health --url https://openplaud.guzus.xyz
 
+# Which mounted volumes look like an open-plaud device? (content-based detection)
+$BIN detect
+
 # Generate a device-format test WAV (16 kHz/16-bit/stereo)
 $BIN make-wav --out /tmp/rec_0001.wav
 
-# List clips in a folder/volume
+# List clips in a folder/volume (sent/ is skipped — see "Auto-detect" above)
 $BIN scan --folder /Volumes/SD16G
 
 # Upload queued clips (idempotent; re-runs skip already-synced)
@@ -186,9 +207,18 @@ These cover the load-bearing pure logic: WAV-header duration parsing (including
 extra chunks + truncated files), the multipart byte layout (field name `file`,
 boundary, `Content-Type: audio/wav`), idempotency (same identity ⇒ skipped;
 persists across runs), retry classification (transient vs permanent), the
-recursive scanner, and tolerant server-response decoding. With Xcode installed, a
+recursive scanner (including the `sent/`-skip so device-uploaded clips aren't
+re-listed), **content-based device detection** (root or `sent/` clips ⇒ detected;
+non-clip folders ⇒ not; detection is shallow so a deeply-buried `rec_*.wav` does
+not false-trigger), and tolerant server-response decoding. With Xcode installed, a
 standard `.testTarget` can be re-added trivially and these same checks moved into
 `@Test`/`XCTest`.
+
+The device *detection predicate* is pure and lives in `OpenPlaudCore`
+(`DeviceDetector`), which is why it's selftestable headlessly; the live
+mount/unmount *watcher* (`DeviceWatcher`, DiskArbitration) lives in the App
+target so Core stays Foundation-only. To see detection against the **real**
+filesystem, run `openplaud detect` (it enumerates actually-mounted volumes).
 
 For a live end-to-end check against a server (proves multipart + auth header +
 response decode), run the Go server locally with a throwaway token and sync a
@@ -225,8 +255,19 @@ $BIN sync --folder "$WORK" --url http://127.0.0.1:8000 --token localtest   # →
 - **Keychain reliability** needs a signed/bundled app; an unsigned `swift run`
   binary may prompt or fail to access the login keychain. That's why the CLI
   takes the token by flag/env instead.
-- The bundled-app distribution (`.app`, code-signing, notarization, the sandbox
-  entitlements for security-scoped folder access) is a packaging step beyond
-  `swift build`; the code is structured for it (security-scoped bookmarks are
-  already wired) but the Xcode wrapper is future work.
+- The bundled-app distribution (`.app`, code-signing, notarization, sandbox
+  entitlements) is a packaging step beyond `swift build`; the code is structured
+  for it (security-scoped bookmarks are already wired) but the Xcode wrapper is
+  future work. Two entitlements matter for a *sandboxed* build: a hand-picked
+  folder needs `com.apple.security.files.user-selected.read-only`, and — new for
+  auto-detect — **reading a mounted SD/USB volume's contents needs
+  `com.apple.security.files.removable-volumes.read-only`**, or the content scan
+  silently returns nothing. An unsandboxed `swift run` binary (how you run it
+  today) is unaffected and reads `/Volumes/...` directly.
+- **Richer device card (volume name + MAC + firmware) needs a firmware marker.**
+  The prototype's card shows the SD label, the device MAC, and a firmware hash.
+  Only the **volume name** is derivable from a bare mounted card; MAC + firmware
+  aren't on the SD. Surfacing them would mean the firmware dropping a small
+  `device.json` identity file in the card root, which detection could then read —
+  a clean future enhancement, out of scope here.
 ```

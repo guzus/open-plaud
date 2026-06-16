@@ -169,6 +169,92 @@ public enum SelfTest {
             let again = clips.first { $0.filename.lowercased() == "rec_0001.wav" }!
             return again.state == .synced && again.remoteID == "r1"
         }
+        check("scanner: skips a top-level sent/ (device already uploaded those)") {
+            // Mirrors a real mounted microSD: pending clips in root, a sent/ dir
+            // of device-uploaded clips, and an unrelated DCIM/ subdir. Only root +
+            // DCIM clips should surface; sent/ must NOT be re-listed/re-uploaded.
+            let fm = FileManager.default
+            let root = fm.temporaryDirectory.appendingPathComponent("op-sent-\(UUID().uuidString)", isDirectory: true)
+            let sent = root.appendingPathComponent("sent", isDirectory: true)
+            let dcim = root.appendingPathComponent("DCIM", isDirectory: true)
+            try fm.createDirectory(at: sent, withIntermediateDirectories: true)
+            try fm.createDirectory(at: dcim, withIntermediateDirectories: true)
+            let wav = WAVWriter.makePCM(sampleFrames: 800)
+            try wav.write(to: root.appendingPathComponent("rec_0007.wav"))
+            try wav.write(to: dcim.appendingPathComponent("rec_0008.wav"))
+            try wav.write(to: sent.appendingPathComponent("rec_0001.wav"))
+            try wav.write(to: sent.appendingPathComponent("rec_0002.wav"))
+            let clips = ClipScanner.scan(root: root)
+            let names = Set(clips.map { $0.filename.lowercased() })
+            return clips.count == 2
+                && names.contains("rec_0007.wav")   // root → kept
+                && names.contains("rec_0008.wav")   // DCIM/ → kept (other subdirs untouched)
+                && !names.contains("rec_0001.wav")  // sent/ → skipped
+                && !names.contains("rec_0002.wav")
+        }
+        check("scanner: isInSentDir matches only a top-level sent/, case-insensitive") {
+            let root = URL(fileURLWithPath: "/Volumes/SD16G")
+            return ClipScanner.isInSentDir(fileURL: root.appendingPathComponent("sent/rec_0001.wav"), root: root)
+                && ClipScanner.isInSentDir(fileURL: root.appendingPathComponent("SENT/rec_0001.wav"), root: root)
+                && !ClipScanner.isInSentDir(fileURL: root.appendingPathComponent("rec_0001.wav"), root: root)
+                && !ClipScanner.isInSentDir(fileURL: root.appendingPathComponent("DCIM/sent/rec_0001.wav"), root: root)
+        }
+
+        // --- Device detection (content-based, shallow) ---
+        // Helper: build a throwaway dir tree and run the detector against it.
+        func makeDir(_ build: (URL) throws -> Void) throws -> URL {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("op-detect-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try build(root)
+            return root
+        }
+        func touch(_ url: URL) throws { try Data("x".utf8).write(to: url) }
+
+        check("detect: root with rec_*.wav looks like the device (name + hint)") {
+            let root = try makeDir { r in
+                try touch(r.appendingPathComponent("rec_0001.wav"))
+                try touch(r.appendingPathComponent("REC_0002.WAV"))
+                try touch(r.appendingPathComponent("notes.txt"))
+            }
+            guard let dv = DeviceDetector.looksLikeOpenPlaudVolume(at: root) else { return false }
+            // Note: `name` comes from the volume the temp dir lives on (e.g.
+            // "Macintosh HD"), not the dir's last component — that's correct
+            // behavior; on a real `/Volumes/SD16G` mount it's the card's name.
+            // So assert it's non-empty, not equal to the path component.
+            return dv.clipCountHint == 2 && dv.url == root && !dv.name.isEmpty
+        }
+        check("detect: a folder with no rec_*.wav is NOT the device") {
+            let root = try makeDir { r in
+                try touch(r.appendingPathComponent("notes.txt"))
+                try touch(r.appendingPathComponent("audio.mp3"))
+            }
+            return DeviceDetector.looksLikeOpenPlaudVolume(at: root) == nil
+        }
+        check("detect: empty root but clips under /sent still looks like the device") {
+            let root = try makeDir { r in
+                let sent = r.appendingPathComponent("sent", isDirectory: true)
+                try FileManager.default.createDirectory(at: sent, withIntermediateDirectories: true)
+                try touch(sent.appendingPathComponent("rec_0009.wav"))
+            }
+            guard let dv = DeviceDetector.looksLikeOpenPlaudVolume(at: root) else { return false }
+            return dv.clipCountHint == 1
+        }
+        check("detect: probe is SHALLOW — a rec_*.wav buried deep does NOT trigger") {
+            // Critical perf guard: detection must not recurse, or it would walk
+            // every mounted volume (incl. the system disk) on each mount event.
+            let root = try makeDir { r in
+                let deep = r.appendingPathComponent("DCIM/sub/more", isDirectory: true)
+                try FileManager.default.createDirectory(at: deep, withIntermediateDirectories: true)
+                try touch(deep.appendingPathComponent("rec_0001.wav"))
+            }
+            return DeviceDetector.looksLikeOpenPlaudVolume(at: root) == nil
+        }
+        check("detect: missing/unreadable directory is safely not-the-device") {
+            let ghost = FileManager.default.temporaryDirectory
+                .appendingPathComponent("op-detect-missing-\(UUID().uuidString)", isDirectory: true)
+            return DeviceDetector.looksLikeOpenPlaudVolume(at: ghost) == nil
+        }
 
         // --- Server response decode (tolerant) ---
         check("decode: full Recording (id/status/size/transcript/summary)") {

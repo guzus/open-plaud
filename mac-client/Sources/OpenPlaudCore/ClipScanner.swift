@@ -13,6 +13,31 @@ public enum ClipScanner {
         return lower.hasPrefix("rec_") && lower.hasSuffix(".wav")
     }
 
+    /// Name of the device's "already uploaded" directory. The firmware records
+    /// pending clips in the SD card root and *moves* each clip to `/sdcard/sent`
+    /// after it has uploaded it directly (over Wi-Fi). See `firmware/.../rec_store`.
+    public static let sentSubdir = "sent"
+
+    /// True when `fileURL`'s first path component under `root` is `sent/`
+    /// (case-insensitive). We use this to skip clips the device already sent.
+    ///
+    /// Why this matters: when the microSD mounts on the Mac, its root holds the
+    /// pending `rec_*.wav` clips *and* a `sent/` folder of clips the device
+    /// already uploaded. Without this guard the recursive scan would descend into
+    /// `sent/`, re-list those clips as `queued`, and the Mac would re-upload every
+    /// one on the first Sync (the server has no content-dedup, and the Mac's
+    /// sync-state store has no record of device-side uploads). We deliberately
+    /// only skip a *top-level* `sent/` so an ordinary user folder that happens to
+    /// contain a `sent` subdir elsewhere is untouched.
+    static func isInSentDir(fileURL: URL, root: URL) -> Bool {
+        let rootComps = root.standardizedFileURL.pathComponents
+        let fileComps = fileURL.standardizedFileURL.pathComponents
+        guard fileComps.count > rootComps.count else { return false }
+        // The component immediately below `root`.
+        let first = fileComps[rootComps.count]
+        return first.compare(sentSubdir, options: .caseInsensitive) == .orderedSame
+    }
+
     /// Scan `root` recursively. Returns clips sorted newest-first (by mtime),
     /// matching the mock's "just now / 2h ago / yesterday" ordering.
     ///
@@ -33,6 +58,16 @@ public enum ClipScanner {
 
         var clips: [Clip] = []
         for case let url as URL in enumerator {
+            // Skip the device's already-uploaded `sent/` directory entirely so we
+            // never re-list (and re-upload) clips the device sent over Wi-Fi.
+            // `skipDescendants()` also avoids walking a card with hundreds of
+            // sent clips.
+            if isInSentDir(fileURL: url, root: root) {
+                if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                    enumerator.skipDescendants()
+                }
+                continue
+            }
             guard isRecWAV(url.lastPathComponent) else { continue }
             guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
             if values.isDirectory == true { continue }

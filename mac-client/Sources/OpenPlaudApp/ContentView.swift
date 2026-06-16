@@ -12,6 +12,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if model.activeDevice != nil {
+                deviceBanner
+                Divider()
+            }
             if model.folderURL == nil {
                 emptyState
             } else if model.clips.isEmpty {
@@ -51,6 +55,16 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            // Escape hatch for "don't clobber": if the user picked a folder by
+            // hand but a device is now mounted, let them switch to it.
+            if model.userChoseFolder, let dev = model.detectedVolumes.first, dev.url != model.folderURL {
+                Button {
+                    model.useAutoDetect()
+                } label: {
+                    Label("Use Device", systemImage: "externaldrive")
+                }
+                .help("Switch to the detected open-plaud device (\(dev.name))")
+            }
             Button {
                 chooseFolder()
             } label: {
@@ -74,27 +88,70 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Device banner (distinct from the server-reachability dot)
+
+    /// "Device connected — <volume>, N clips (M to sync)", matching the prototype.
+    /// Uses its own green dot so it doesn't collide with the header's server dot.
+    private var deviceBanner: some View {
+        HStack(spacing: 8) {
+            Circle().fill(Color.green).frame(width: 8, height: 8)
+            Text("Device connected")
+                .font(.subheadline.weight(.semibold))
+            if let dev = model.activeDevice {
+                Text(deviceDetail(dev))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if model.isUsingAutoDetectedDevice {
+                Text("auto-detected")
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.green.opacity(0.15), in: Capsule())
+                    .foregroundStyle(.green)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.green.opacity(0.06))
+    }
+
+    private func deviceDetail(_ dev: DetectedVolume) -> String {
+        let n = model.clips.count
+        let m = model.queuedCount
+        let clips = "\(n) clip\(n == 1 ? "" : "s")"
+        return m > 0 ? "\(dev.name) · \(clips) (\(m) to sync)" : "\(dev.name) · \(clips)"
+    }
+
     // MARK: - States
 
     private var emptyState: some View {
         VStack(spacing: 14) {
             Spacer()
-            Image(systemName: "waveform.circle")
-                .font(.system(size: 52))
+            Image(systemName: "externaldrive.badge.questionmark")
+                .font(.system(size: 50))
                 .foregroundStyle(.secondary)
-            Text("Sync your open-plaud recordings")
+                .symbolRenderingMode(.hierarchical)
+            Text("Plug in the device or insert its microSD")
                 .font(.title3.weight(.semibold))
-            Text("Insert the device's microSD card (or choose a folder of clips).\nThe app finds every rec_*.wav and uploads it to your server.")
+                .multilineTextAlignment(.center)
+            Text("open-plaud auto-detects the device's storage the moment it mounts,\nfinds every rec_*.wav, and syncs it to your server.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            // Searching indicator so the empty state doesn't feel inert.
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Waiting for a device…").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
             Button {
                 chooseFolder()
             } label: {
-                Label("Choose Folder or SD Card…", systemImage: "folder.badge.plus")
+                Label("Or choose a folder of clips…", systemImage: "folder.badge.plus")
             }
             .controlSize(.large)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
