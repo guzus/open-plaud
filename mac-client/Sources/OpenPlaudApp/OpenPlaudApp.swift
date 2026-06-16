@@ -19,6 +19,9 @@ struct OpenPlaudApp: App {
                 .frame(minWidth: 560, minHeight: 420)
                 .onAppear {
                     model.checkHealth()
+                    // Start live device detection (does an immediate sweep, so an
+                    // already-inserted card is picked up at launch).
+                    model.startWatchingForDevice()
                     if model.folderURL != nil { model.scan() }
                 }
         }

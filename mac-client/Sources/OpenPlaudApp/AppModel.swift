@@ -13,23 +13,129 @@ final class AppModel: ObservableObject {
     @Published var statusLine: String = ""
     @Published var serverReachable: Bool? = nil
 
+    /// Mounted volumes that content-look like the open-plaud device (from the
+    /// background watcher). Drives the "Device connected" card / empty state.
+    @Published var detectedVolumes: [DetectedVolume] = []
+
+    /// True once the user has explicitly picked a folder (via the panel) or
+    /// restored a saved bookmark. While true we never auto-clobber their choice
+    /// with an auto-detected device.
+    @Published private(set) var userChoseFolder = false
+
     let settings: AppSettings
     private let store: SyncStateStore
+    private var watcher: DeviceWatcher?
 
     init(settings: AppSettings) {
         self.settings = settings
         self.store = SyncStateStore()
         if let url = settings.resolveFolderBookmark() {
             self.folderURL = url
+            self.userChoseFolder = true
         }
     }
 
     var queuedCount: Int { clips.filter { $0.state == .queued || $0.state == .failed }.count }
     var syncedCount: Int { clips.filter { $0.state == .synced }.count }
 
+    /// The detected device whose volume is the one we're currently scanning, if
+    /// any (so the UI can label the card with the live clip counts).
+    var activeDevice: DetectedVolume? {
+        guard let folderURL else { return nil }
+        return detectedVolumes.first { $0.url == folderURL }
+    }
+
+    /// True when the current sync source is an auto-detected device volume the
+    /// user did not pick by hand.
+    var isUsingAutoDetectedDevice: Bool {
+        !userChoseFolder && activeDevice != nil
+    }
+
+    // MARK: - Device detection wiring
+
+    /// Start watching for the device mounting/unmounting. Safe to call once at
+    /// launch; the watcher delivers an immediate sweep so an already-inserted
+    /// card is picked up right away.
+    func startWatchingForDevice() {
+        guard watcher == nil else { return }
+        let w = DeviceWatcher { [weak self] volumes in
+            self?.deviceVolumesChanged(volumes)
+        }
+        watcher = w
+        w.start()
+    }
+
+    /// React to a change in the set of detected device volumes.
+    ///
+    /// Rules (don't-clobber + auto-pick):
+    ///  - If the user picked a folder by hand, never change their selection here;
+    ///    just keep the detected list fresh for the UI.
+    ///  - Otherwise auto-pick the top detected device as the sync source (kept
+    ///    in-memory only — a transient SD mount is never persisted as a bookmark).
+    ///  - If the auto-picked device unmounts, drop the selection and clear clips.
+    private func deviceVolumesChanged(_ volumes: [DetectedVolume]) {
+        // Ignore steady-state polls: the watcher re-probes every ~2 s, so without
+        // this guard an unchanged set would republish to SwiftUI and (worse, for
+        // an all-sent device whose root is empty) re-fire scan() forever. Only act
+        // on a genuine change to the detected set. `DetectedVolume` is Equatable.
+        guard volumes != detectedVolumes else { return }
+        let previous = detectedVolumes
+        detectedVolumes = volumes
+        reconcileAutoSelection(previous: previous)
+    }
+
+    /// Pick (or release) the auto-detected device based on the current
+    /// `detectedVolumes`, honoring a manual choice. Safe to call whenever the set
+    /// changes or when switching back to auto-detect.
+    private func reconcileAutoSelection(previous: [DetectedVolume]) {
+        guard !userChoseFolder else { return } // never clobber a manual choice
+
+        if let current = folderURL, detectedVolumes.contains(where: { $0.url == current }) {
+            // We're already on a detected device that's still mounted → stay put.
+            // (Deliberately do NOT jump to a newly-inserted second card with more
+            // clips; switching an in-progress source out from under the user is
+            // surprising. The replace case — this device unmounting — is handled
+            // below.)
+            return
+        }
+
+        if let device = detectedVolumes.first {
+            // No current selection (or the one we had vanished) → adopt the top
+            // detected device. Kept in-memory only; a transient SD mount is never
+            // persisted as a bookmark.
+            selectSource(device.url, userChosen: false)
+        } else if folderURL != nil, previous.contains(where: { $0.url == folderURL }) {
+            // The auto-detected device we were using went away → reset to empty.
+            folderURL = nil
+            clips = []
+            statusLine = "Device removed."
+        }
+    }
+
     func chooseFolder(_ url: URL) {
         settings.saveFolderBookmark(url)
+        selectSource(url, userChosen: true)
+    }
+
+    /// Forget a hand-picked folder and fall back to auto-detection. Lets the user
+    /// "un-stick" a manual choice so an inserted device takes over again.
+    func useAutoDetect() {
+        settings.clearFolderBookmark()
+        userChoseFolder = false
+        folderURL = nil
+        clips = []
+        // Re-evaluate against whatever is currently mounted. (Pass the current set
+        // as `previous` so the unmount branch isn't taken; there's nothing to
+        // "lose" here — we just adopt whatever is mounted, or land on empty.)
+        reconcileAutoSelection(previous: detectedVolumes)
+    }
+
+    /// Switch the sync source and (re)scan. Clears the previous clip list up front
+    /// so the UI never shows the new source labeled with the old source's count.
+    private func selectSource(_ url: URL, userChosen: Bool) {
         folderURL = url
+        userChoseFolder = userChosen
+        clips = []          // avoid a stale count flashing in the device banner
         scan()
     }
 
@@ -38,12 +144,17 @@ final class AppModel: ObservableObject {
         isScanning = true
         statusLine = "Scanning…"
         let store = self.store
+        // Capture the source this scan is for, so that if the user/device switches
+        // sources mid-scan, a late-finishing scan discards its result instead of
+        // overwriting the current list (lost-update race on rapid switches).
         Task.detached {
             // Access the security scope while scanning a bookmarked folder.
             let scoped = folder.startAccessingSecurityScopedResource()
             defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
             let found = ClipScanner.scan(root: folder, store: store)
             await MainActor.run {
+                // Discard a stale result if the source changed while we scanned.
+                guard self.folderURL == folder else { return }
                 self.clips = found
                 self.isScanning = false
                 self.statusLine = found.isEmpty ? "No rec_*.wav found in this folder." : "\(found.count) clip(s)."

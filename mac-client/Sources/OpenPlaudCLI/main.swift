@@ -72,6 +72,7 @@ guard let command = argv.first else {
 
     Commands:
       health    --url <base>
+      detect                                    (list mounted volumes that look like the device)
       scan      --folder <path>
       sync      --folder <path> [--url <base>] [--token <t>] [--concurrency N] [--state <file>]
       make-wav  --out <path.wav>
@@ -94,6 +95,21 @@ case "selftest":
     let passed = results.filter { $0.passed }.count
     print("\n\(passed)/\(results.count) checks passed.")
     exit(ok ? 0 : 1)
+
+case "detect":
+    // Real-filesystem evidence for content-based device detection: enumerate
+    // mounted volumes and print the ones whose root (or /sent) holds rec_*.wav.
+    // Same Core code the GUI's DiskArbitration watcher and the selftest exercise.
+    let found = DeviceDetector.detectOpenPlaudVolumes()
+    if found.isEmpty {
+        print("No open-plaud device volume found. Plug in the device or insert its microSD.")
+        exit(0)
+    }
+    for dv in found {
+        print("\(dv.name) — \(dv.url.path) (\(dv.clipCountHint)+ rec_*.wav)")
+    }
+    print("\n\(found.count) device volume(s).")
+    exit(0)
 
 case "make-wav":
     guard let out = args.string("out") else { fail("make-wav requires --out <path.wav>") }
