@@ -1,6 +1,27 @@
 import Foundation
 import Combine
 import OpenPlaudCore
+import OpenPlaudUSB
+
+/// The app's top-level device connection state, derived from TWO independent
+/// signals: a mounted SD volume (content-based, from `DeviceWatcher`) and a USB
+/// cable (VID-based, from `USBWatcher`).
+///
+/// Precedence is deliberate and non-regressing: a **volume always wins**. A
+/// microSD in a generic card reader enumerates under the *reader's* USB vendor,
+/// not Espressif's, so gating "connected" on a USB-VID match would break the
+/// exact card-reader case the volume detection already handles. USB matching only
+/// *adds* the new "recorder plugged in but no readable volume" state.
+enum ConnectionState: Equatable {
+    /// An SD volume is present (SD-in-reader today, or a future USB drive mode) →
+    /// clips are readable, sync is enabled.
+    case connectedWithVolume
+    /// An Espressif/open-plaud device is on USB but exposes no volume (recorder
+    /// mode, PID 0x1001) → cannot sync from the cable yet.
+    case recorderNoVolume(USBDevice)
+    /// Neither signal present.
+    case none
+}
 
 /// Observable bridge between the SwiftUI views and the OpenPlaudCore engine.
 /// Holds the current clip list, drives scans and syncs, and surfaces progress.
@@ -17,6 +38,10 @@ final class AppModel: ObservableObject {
     /// background watcher). Drives the "Device connected" card / empty state.
     @Published var detectedVolumes: [DetectedVolume] = []
 
+    /// Espressif (VID 0x303A) USB devices currently attached (from the USB
+    /// watcher). Used for the "recorder mode, no volume" state and labeling.
+    @Published var usbDevices: [USBDevice] = []
+
     /// True once the user has explicitly picked a folder (via the panel) or
     /// restored a saved bookmark. While true we never auto-clobber their choice
     /// with an auto-detected device.
@@ -25,6 +50,7 @@ final class AppModel: ObservableObject {
     let settings: AppSettings
     private let store: SyncStateStore
     private var watcher: DeviceWatcher?
+    private var usbWatcher: USBWatcher?
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -51,18 +77,54 @@ final class AppModel: ObservableObject {
         !userChoseFolder && activeDevice != nil
     }
 
+    /// The open-plaud USB device currently attached, if any (first Espressif
+    /// device). Used to label states and detect recorder mode.
+    var usbRecorder: USBDevice? { usbDevices.first }
+
+    /// Derived top-level connection state. Volume presence wins (non-regressing —
+    /// see `ConnectionState`); USB only contributes the recorder-no-volume state.
+    var connectionState: ConnectionState {
+        if folderURL != nil {
+            // A readable source is selected (auto-detected device, or a folder the
+            // user chose). Either way clips are syncable. (`activeDevice != nil`
+            // implies this, so checking `folderURL` alone suffices.)
+            return .connectedWithVolume
+        }
+        if let usb = usbDevices.first {
+            // Cable present but no mountable volume yet (recorder mode today).
+            return .recorderNoVolume(usb)
+        }
+        return .none
+    }
+
     // MARK: - Device detection wiring
 
-    /// Start watching for the device mounting/unmounting. Safe to call once at
-    /// launch; the watcher delivers an immediate sweep so an already-inserted
-    /// card is picked up right away.
+    /// Start watching for the device mounting/unmounting (SD volume) AND for the
+    /// device being plugged in over USB. Safe to call once at launch; both
+    /// watchers deliver an immediate snapshot so an already-present device shows.
     func startWatchingForDevice() {
-        guard watcher == nil else { return }
-        let w = DeviceWatcher { [weak self] volumes in
-            self?.deviceVolumesChanged(volumes)
+        if watcher == nil {
+            let w = DeviceWatcher { [weak self] volumes in
+                self?.deviceVolumesChanged(volumes)
+            }
+            watcher = w
+            w.start()
         }
-        watcher = w
-        w.start()
+        if usbWatcher == nil {
+            let u = USBWatcher { [weak self] devices in
+                self?.usbDevicesChanged(devices)
+            }
+            usbWatcher = u
+            u.start()
+        }
+    }
+
+    /// React to a change in the set of attached open-plaud USB devices. Pure
+    /// presence/labeling — it never changes the sync *source* (volume detection
+    /// owns that). Equality-guarded so duplicate snapshots are no-ops.
+    private func usbDevicesChanged(_ devices: [USBDevice]) {
+        guard devices != usbDevices else { return }
+        usbDevices = devices
     }
 
     /// React to a change in the set of detected device volumes.

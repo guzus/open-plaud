@@ -34,15 +34,30 @@ correct v1.** See the roadmap below for the wired-in / wireless options.
 
 ## What it does
 
-- **Auto-detect the device**: the app watches for volumes mounting/unmounting
-  (via the **DiskArbitration** framework, with a 2 s poll fallback) and
-  recognizes the open-plaud card by **content** — an external volume whose root
-  (or `sent/` subdir) holds `rec_*.wav` clips. Detection is content-based, not
-  name- or USB-ID-based, so the *same code* recognizes an SD in a card reader
-  today and a future USB-MSC drive from the device. When found, the UI shows
-  **"Device connected — <volume>, N clips (M to sync)"** and auto-selects it as
-  the sync source; on eject it returns to the empty state. A folder you pick by
-  hand is never clobbered by auto-detect (a "Use Device" button lets you switch).
+- **Auto-detect the device (two signals)**: the app recognizes the open-plaud
+  device from *either* of two independent watchers:
+  - **SD volume (content)** — via the **DiskArbitration** framework (with a 2 s
+    poll fallback), it recognizes the card by **content**: an external volume
+    whose root (or `sent/` subdir) holds `rec_*.wav`. Content-based, not name- or
+    USB-ID-based, so the *same code* handles an SD in a card reader today and a
+    future USB-MSC drive. → **"Device connected — <volume>, N clips (M to sync)"**,
+    auto-selected as the sync source; sync enabled.
+  - **USB cable (vendor ID)** — via **IOKit USB**, it notices the device the
+    moment it's plugged in, *even in normal recorder mode when no drive is
+    mounted* (today the recorder just exposes a serial port). It matches
+    Espressif's vendor ID `0x303A` and reads the product ID to tell recorder mode
+    (`0x1001`, USB-Serial/JTAG) from a future drive mode (`0x4002`/`0x4003`,
+    USB-MSC). → **"open-plaud connected (recorder mode)"** with guidance to insert
+    the microSD or use Wi-Fi; sync stays disabled (clips aren't readable over the
+    cable yet).
+
+  Precedence is deliberate and non-regressing: a **mounted volume always wins**
+  (a microSD in a generic card reader enumerates under the reader's USB vendor,
+  not Espressif's, so the USB signal only *adds* the recorder-mode state — it
+  never gates the volume path). A folder you pick by hand is never clobbered by
+  auto-detect (a "Use Device" button lets you switch). VID `0x303A` is generic to
+  all Espressif boards, so the label is honest ("open-plaud device (ESP32)")
+  unless the USB product string literally says `open-plaud`.
 - **Scan**: recursively finds `rec_*.wav` (case-insensitive) under the chosen
   folder/volume. For each clip it shows filename, size, **duration** (parsed from
   the WAV header), and **sync state**: `queued` / `syncing` / `synced` / `failed`.
@@ -71,25 +86,29 @@ mac-client/
 ├── README.md
 ├── .gitignore                            # .build/, DerivedData, *.xcuserstate, local state
 └── Sources/
-    ├── OpenPlaudCore/                     # testable core library (no SwiftUI, no Keychain)
+    ├── OpenPlaudCore/                     # testable core library (no SwiftUI, no Keychain, no IOKit)
     │   ├── WAV.swift                      #   WAV header parse (duration) + minimal WAV writer
     │   ├── Clip.swift                     #   Clip model + ClipIdentity (idempotency key)
     │   ├── ClipScanner.swift              #   recursive rec_*.wav scan (skips sent/) + state hydration
     │   ├── DeviceDetector.swift           #   pure, shallow "is this an open-plaud volume?" + volume enum
+    │   ├── USBDevice.swift                #   pure USB model + VID/PID→mode interpretation (no IOKit)
     │   ├── SyncStateStore.swift           #   durable JSON synced-state store (shared CLI+GUI)
     │   ├── Multipart.swift                #   multipart/form-data body (field "file", audio/wav)
     │   ├── ServerModels.swift             #   tolerant decode of the server's Recording JSON
     │   ├── UploadClient.swift             #   POST upload + health + retry classification
     │   ├── SyncEngine.swift               #   concurrency-limited, retrying, idempotent sync
     │   └── SelfTest.swift                 #   framework-free unit checks (see Testing below)
+    ├── OpenPlaudUSB/                       # IOKit USB enumeration + watcher (shared by CLI + app)
+    │   ├── USBEnumerator.swift            #   one-shot IOKit enumeration of attached USB devices
+    │   └── USBWatcher.swift               #   live attach/detach notifications (IOServiceAddMatchingNotification)
     ├── OpenPlaudCLI/                       # headless CLI for verification + scripted syncs
-    │   └── main.swift                      #   openplaud {health,detect,scan,sync,make-wav,selftest}
+    │   └── main.swift                      #   openplaud {health,detect,usb,scan,sync,make-wav,selftest}
     └── OpenPlaudApp/                       # SwiftUI app — UI + wiring only
         ├── OpenPlaudApp.swift             #   @main App + Settings scene
-        ├── ContentView.swift              #   "Device connected" banner, clip list, pills, empty state
+        ├── ContentView.swift              #   "Device connected" / recorder-mode banner, clip list, states
         ├── DeviceWatcher.swift            #   DiskArbitration mount/unmount watcher (App-only)
         ├── SettingsView.swift             #   server URL + token (write-only) UI
-        ├── AppModel.swift                 #   ObservableObject bridging views ↔ core engine + detection
+        ├── AppModel.swift                 #   ObservableObject: clips, volume + USB detection, ConnectionState
         ├── AppSettings.swift              #   URL in UserDefaults, token via Keychain
         └── Keychain.swift                 #   generic-password Keychain wrapper for the token
 ```
@@ -119,6 +138,10 @@ swift run OpenPlaudApp
    auto-detects it, and the **"Device connected"** banner appears with the live
    clip count. No folder-picking required. (You can still **Choose a folder…**
    for arbitrary clip folders.)
+   - If you plug in the device over **USB in recorder mode** (no microSD inserted),
+     the app recognizes it and shows **"open-plaud connected (recorder mode)"** —
+     a distinct state that does *not* offer Sync, since clips aren't readable over
+     the cable yet. Insert the microSD (or use Wi-Fi sync) to upload.
 2. Open **Settings** (gear / ⌘,) → set the **Server base URL** and paste your
    **auth token** (saved to the Keychain). Use **Test Connection** to confirm.
 3. Click **Sync N clips** (⌘S). Watch each row go `queued → syncing → synced`.
@@ -136,6 +159,10 @@ $BIN health --url https://openplaud.guzus.xyz
 
 # Which mounted volumes look like an open-plaud device? (content-based detection)
 $BIN detect
+
+# Which USB devices are attached? Flags the open-plaud / Espressif ones + mode.
+# (Filesystem-independent: works even in recorder mode with no volume mounted.)
+$BIN usb
 
 # Generate a device-format test WAV (16 kHz/16-bit/stereo)
 $BIN make-wav --out /tmp/rec_0001.wav
@@ -184,13 +211,15 @@ The server contract is documented in [`../server-go/README.md`](../server-go/REA
 
 | Stage | How clips reach the Mac | Firmware change | Status |
 |---|---|---|---|
-| **v1 (now)** | Remove microSD → mount → choose folder/volume | none | **shipped** |
-| **v1.x** | Device exposes its SD as a USB drive (USB-MSC) | yes (device side) | same client code path; no app change needed |
+| **v1 (now)** | Remove microSD → mount → auto-detected by content | none | **shipped** |
+| **v1 (now)** | Plug in over USB → recognized by vendor ID (recorder mode shown) | none | **shipped** (recognition only; can't pull clips over the serial cable yet) |
+| **v1.x** | Device exposes its SD as a USB drive (USB-MSC) | yes (device side) | same client code path; auto-detect already maps PID `0x4002`/`0x4003` → drive mode |
 | **v2** | USB-serial pull protocol | yes | future — direct cable transfer without ejecting SD |
 | **v2** | BLE wireless pull | yes (more work) | future — cable-free |
 
 v1 is built so the USB-MSC step is **free** on the app side: a USB-exposed SD is
-just another mounted volume.
+just another mounted volume, and the USB watcher already recognizes the drive-mode
+product IDs.
 
 ## Testing / verification
 
@@ -210,15 +239,27 @@ persists across runs), retry classification (transient vs permanent), the
 recursive scanner (including the `sent/`-skip so device-uploaded clips aren't
 re-listed), **content-based device detection** (root or `sent/` clips ⇒ detected;
 non-clip folders ⇒ not; detection is shallow so a deeply-buried `rec_*.wav` does
-not false-trigger), and tolerant server-response decoding. With Xcode installed, a
-standard `.testTarget` can be re-added trivially and these same checks moved into
-`@Test`/`XCTest`.
+not false-trigger), **USB VID/PID interpretation** (VID `0x303A` ⇒ Espressif/
+open-plaud; PID `0x1001` ⇒ recorder mode, no volume; `0x4002`/`0x4003` ⇒ drive
+mode; unknown PID ⇒ present-but-mode-unknown; honest display name), and tolerant
+server-response decoding. With Xcode installed, a standard `.testTarget` can be
+re-added trivially and these same checks moved into `@Test`/`XCTest`.
 
-The device *detection predicate* is pure and lives in `OpenPlaudCore`
-(`DeviceDetector`), which is why it's selftestable headlessly; the live
-mount/unmount *watcher* (`DeviceWatcher`, DiskArbitration) lives in the App
-target so Core stays Foundation-only. To see detection against the **real**
-filesystem, run `openplaud detect` (it enumerates actually-mounted volumes).
+The pure predicates live in `OpenPlaudCore` (`DeviceDetector`, `USBInterpreter`),
+which is why they're selftestable headlessly. The framework-bound *watchers* live
+outside Core so it stays Foundation-only: the SD mount/unmount watcher
+(`DeviceWatcher`, DiskArbitration) is App-side, and the USB attach/detach watcher
++ IOKit enumeration (`OpenPlaudUSB`) is a small shared library used by both the
+CLI and the app. To see detection against **real** hardware:
+
+```bash
+openplaud detect   # mounted volumes that look like the device (content-based)
+openplaud usb      # attached USB devices; flags open-plaud / Espressif + mode
+```
+
+`openplaud usb` is filesystem-independent — it works in recorder mode when no
+volume is mounted. (On a machine with the device asleep or unplugged it lists the
+other USB devices, or none; that's expected.)
 
 For a live end-to-end check against a server (proves multipart + auth header +
 response decode), run the Go server locally with a throwaway token and sync a
@@ -255,15 +296,27 @@ $BIN sync --folder "$WORK" --url http://127.0.0.1:8000 --token localtest   # →
 - **Keychain reliability** needs a signed/bundled app; an unsigned `swift run`
   binary may prompt or fail to access the login keychain. That's why the CLI
   takes the token by flag/env instead.
+- **USB recognition is presence-only; you can't pull clips over the cable yet.**
+  In recorder mode the device exposes a USB-Serial/JTAG port, not a drive, so the
+  app can *tell it's plugged in* (and say so) but can't read clips from it — that
+  needs either the microSD inserted, Wi-Fi sync, or a future device-side USB-MSC /
+  serial-pull protocol. The watcher already maps the drive-mode PIDs so the SD
+  shows up automatically once the firmware supports USB-MSC.
+- **VID `0x303A` is Espressif-generic, not open-plaud-specific.** Any ESP32 board
+  shares it, so the USB match means "an Espressif device" — labeled honestly as
+  "open-plaud device (ESP32)" unless the USB product string says `open-plaud`. A
+  firmware that sets a distinctive product string (or a `device.json` on the SD)
+  would let the app assert identity more strongly; out of scope here.
 - The bundled-app distribution (`.app`, code-signing, notarization, sandbox
   entitlements) is a packaging step beyond `swift build`; the code is structured
   for it (security-scoped bookmarks are already wired) but the Xcode wrapper is
-  future work. Two entitlements matter for a *sandboxed* build: a hand-picked
-  folder needs `com.apple.security.files.user-selected.read-only`, and — new for
-  auto-detect — **reading a mounted SD/USB volume's contents needs
-  `com.apple.security.files.removable-volumes.read-only`**, or the content scan
-  silently returns nothing. An unsandboxed `swift run` binary (how you run it
-  today) is unaffected and reads `/Volumes/...` directly.
+  future work. Three entitlements matter for a *sandboxed* build: a hand-picked
+  folder needs `com.apple.security.files.user-selected.read-only`; reading a
+  mounted SD/USB volume's contents needs
+  `com.apple.security.files.removable-volumes.read-only` (or the content scan
+  silently returns nothing); and — new for USB recognition — IOKit USB device
+  matching needs **`com.apple.security.device.usb`**. An unsandboxed `swift run`
+  binary (how you run it today) is unaffected.
 - **Richer device card (volume name + MAC + firmware) needs a firmware marker.**
   The prototype's card shows the SD label, the device MAC, and a firmware hash.
   Only the **volume name** is derivable from a bare mounted card; MAC + firmware

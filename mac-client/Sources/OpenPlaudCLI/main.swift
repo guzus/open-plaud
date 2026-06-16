@@ -1,5 +1,6 @@
 import Foundation
 import OpenPlaudCore
+import OpenPlaudUSB
 
 // Headless CLI for verification + scripted syncs.
 //
@@ -65,6 +66,13 @@ func fmtSize(_ bytes: Int) -> String {
     return "\(bytes) B"
 }
 
+/// Left/right pad to a fixed column width (for table output).
+func pad(_ s: String, _ w: Int, right: Bool = false) -> String {
+    if s.count >= w { return s }
+    let fill = String(repeating: " ", count: w - s.count)
+    return right ? fill + s : s + fill
+}
+
 let argv = Array(CommandLine.arguments.dropFirst())
 guard let command = argv.first else {
     print("""
@@ -73,6 +81,7 @@ guard let command = argv.first else {
     Commands:
       health    --url <base>
       detect                                    (list mounted volumes that look like the device)
+      usb                                       (list USB devices; flags open-plaud / Espressif)
       scan      --folder <path>
       sync      --folder <path> [--url <base>] [--token <t>] [--concurrency N] [--state <file>]
       make-wav  --out <path.wav>
@@ -111,6 +120,32 @@ case "detect":
     print("\n\(found.count) device volume(s).")
     exit(0)
 
+case "usb":
+    // Filesystem-independent evidence for USB-cable recognition: enumerate ALL
+    // attached USB devices via IOKit, flag the open-plaud / Espressif ones, and
+    // interpret the PID. Same Core interpretation the GUI's USB watcher uses.
+    let all = USBEnumerator.allUSBDevices()
+    if all.isEmpty {
+        print("No USB devices visible to IOKit.")
+        print("(If the device is asleep/disconnected, its USB won't appear — wake it or replug.)")
+        exit(0)
+    }
+    func hex(_ v: Int) -> String { String(format: "0x%04X", v) }
+    print("VID    PID    OPEN-PLAUD?  MODE                         PRODUCT")
+    var openPlaudCount = 0
+    for d in all {
+        let isOurs = d.isEspressif
+        if isOurs { openPlaudCount += 1 }
+        let flag = isOurs ? "yes" : "no "
+        let mode = isOurs ? d.mode.label : "-"
+        let name = d.productName ?? (isOurs ? d.displayName : "—")
+        let line = "\(hex(d.vendorID)) \(hex(d.productID)) "
+            + pad(flag, 12) + pad(mode, 29) + name
+        print(line)
+    }
+    print("\n\(all.count) USB device(s); \(openPlaudCount) look like open-plaud (Espressif VID \(hex(espressifVendorID))).")
+    exit(0)
+
 case "make-wav":
     guard let out = args.string("out") else { fail("make-wav requires --out <path.wav>") }
     let data = WAVWriter.makePCM() // 16 kHz / 16-bit / stereo, 0.1s
@@ -139,11 +174,6 @@ case "scan":
     if clips.isEmpty {
         print("No rec_*.wav files found under \(folder)")
         exit(0)
-    }
-    func pad(_ s: String, _ w: Int, right: Bool = false) -> String {
-        if s.count >= w { return s }
-        let fill = String(repeating: " ", count: w - s.count)
-        return right ? fill + s : s + fill
     }
     print("\(pad("FILE", 24)) \(pad("SIZE", 9, right: true)) \(pad("DUR", 6, right: true))  STATE")
     for c in clips {

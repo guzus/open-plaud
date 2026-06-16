@@ -16,13 +16,7 @@ struct ContentView: View {
                 deviceBanner
                 Divider()
             }
-            if model.folderURL == nil {
-                emptyState
-            } else if model.clips.isEmpty {
-                emptyFolderState
-            } else {
-                clipList
-            }
+            content
             Divider()
             footer
         }
@@ -125,6 +119,59 @@ struct ContentView: View {
 
     // MARK: - States
 
+    /// Main content area, chosen by the derived connection state. A selected
+    /// source (device or folder) shows the clip list / empty-folder; otherwise we
+    /// show recorder-mode (USB cable, no volume) or the plain empty state.
+    @ViewBuilder
+    private var content: some View {
+        if model.folderURL != nil {
+            if model.clips.isEmpty { emptyFolderState } else { clipList }
+        } else if case .recorderNoVolume(let usb) = model.connectionState {
+            recorderModeState(usb)
+        } else {
+            emptyState
+        }
+    }
+
+    /// USB cable present but no mountable volume (recorder firmware today).
+    /// Deliberately distinct from "Device connected" and does NOT offer Sync —
+    /// clips aren't readable over the cable yet.
+    private func recorderModeState(_ usb: USBDevice) -> some View {
+        VStack(spacing: 14) {
+            Spacer()
+            Image(systemName: "cable.connector")
+                .font(.system(size: 48))
+                .foregroundStyle(.orange)
+                .symbolRenderingMode(.hierarchical)
+            Text("\(usb.displayName) connected (recorder mode)")
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+            Text("The device is plugged in over USB, but its clips aren't readable\nover the cable yet. Insert its microSD here, or sync over Wi-Fi.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Text(usbDetail(usb))
+                .font(.caption.monospaced())
+                .foregroundStyle(.tertiary)
+            Button {
+                chooseFolder()
+            } label: {
+                Label("Insert microSD / choose a folder…", systemImage: "sdcard")
+            }
+            .controlSize(.large)
+            .buttonStyle(.bordered)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private func usbDetail(_ usb: USBDevice) -> String {
+        let vid = String(format: "0x%04X", usb.vendorID)
+        let pid = String(format: "0x%04X", usb.productID)
+        return "USB \(vid):\(pid) · \(usb.mode.label)"
+    }
+
     private var emptyState: some View {
         VStack(spacing: 14) {
             Spacer()
@@ -135,7 +182,7 @@ struct ContentView: View {
             Text("Plug in the device or insert its microSD")
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
-            Text("open-plaud auto-detects the device's storage the moment it mounts,\nfinds every rec_*.wav, and syncs it to your server.")
+            Text("open-plaud recognizes the device over USB and auto-detects its\nstorage the moment it mounts, then syncs every rec_*.wav to your server.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

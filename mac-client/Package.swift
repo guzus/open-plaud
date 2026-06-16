@@ -13,22 +13,32 @@ let package = Package(
         .executable(name: "OpenPlaudApp", targets: ["OpenPlaudApp"]),
     ],
     targets: [
-        // Pure, testable logic: scanning, WAV parsing, multipart, upload, retry, state.
-        // No SwiftUI/AppKit here so it stays unit-testable and headless-friendly.
+        // Pure, testable logic: scanning, WAV parsing, multipart, upload, retry, state,
+        // and USB VID/PID *interpretation*. No SwiftUI/AppKit/IOKit here so it stays
+        // unit-testable and headless-friendly.
         .target(
             name: "OpenPlaudCore",
             path: "Sources/OpenPlaudCore"
         ),
+        // IOKit-backed USB enumeration + live attach/detach watcher. Kept OUT of
+        // Core (which must stay Foundation-only) but shared by both the CLI and the
+        // app so the IOKit code isn't duplicated. Depends on Core for the pure
+        // USBDevice model + VID/PID interpretation.
+        .target(
+            name: "OpenPlaudUSB",
+            dependencies: ["OpenPlaudCore"],
+            path: "Sources/OpenPlaudUSB"
+        ),
         // Headless CLI for verification (scan + sync from flags/env, no Keychain/UserDefaults).
         .executableTarget(
             name: "OpenPlaudCLI",
-            dependencies: ["OpenPlaudCore"],
+            dependencies: ["OpenPlaudCore", "OpenPlaudUSB"],
             path: "Sources/OpenPlaudCLI"
         ),
         // SwiftUI app: UI + wiring only. Keychain (token) + UserDefaults (URL) live here.
         .executableTarget(
             name: "OpenPlaudApp",
-            dependencies: ["OpenPlaudCore"],
+            dependencies: ["OpenPlaudCore", "OpenPlaudUSB"],
             path: "Sources/OpenPlaudApp"
         ),
         // NOTE: No XCTest target. The target environment is macOS Command Line
