@@ -428,8 +428,10 @@ void app_main(void)
                 last_refresh = now;
             }
             /* Auto deep sleep after an idle stretch — the big standby win. Wakes
-             * (reboots) on Record/Sync. Disabled when the timeout is 0. */
-            if (CONFIG_OPEN_PLAUD_IDLE_SLEEP_S > 0 &&
+             * (reboots) on Record/Sync. Skipped while charging/USB-powered so the
+             * device stays awake + USB-recognizable when plugged into a computer.
+             * Disabled when the timeout is 0. */
+            if (CONFIG_OPEN_PLAUD_IDLE_SLEEP_S > 0 && !power_is_charging() &&
                 now - last_activity >= pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_IDLE_SLEEP_S * 1000)) {
                 ESP_LOGI(TAG, "idle %ds - deep sleep (wake on Record/Sync)",
                          CONFIG_OPEN_PLAUD_IDLE_SLEEP_S);

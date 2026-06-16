@@ -12,6 +12,12 @@ esp_err_t power_init(void);
  * non-NULL it is set true while the charger reports charging. */
 int power_battery_pct(bool *out_charging);
 
+/* True while the charger reports charging — a proxy for "USB power present"
+ * (this board has no VBUS-sense pin). Used to suppress deep sleep while plugged
+ * in so the device stays awake + USB-recognizable. Caveat: a fully-charged
+ * battery on USB reads NOT charging, so that edge can still sleep. */
+bool power_is_charging(void);
+
 /* True if this boot is a wake from deep sleep (a button press) rather than a
  * cold power-on. Lets the boot path skip the heavy Wi-Fi retry + SD autoformat
  * on every wake. Logs the wake cause. */
