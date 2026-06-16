@@ -16,12 +16,16 @@ While *actively on*, the recorder is a **use-and-charge** device measured in
 - **Idle, screen off** (tap the **Left/Power** button to blank the backlight): ~6–14 h
 - **Continuous recording:** ~2–5 h
 
-But it no longer *stays* actively on: **deep sleep is implemented** — after an idle
-timeout (`OPEN_PLAUD_IDLE_SLEEP_S`, default 60 s) the device sleeps and wakes
-(reboots, ~2 s) on a **Record or Sync** press. Sleep/wake is **verified on
-hardware**; the actual sleep *current* is **not yet measured**, so the
-months-scale standby below is **expected, not confirmed**. The screen also blanks
-while recording (`OPEN_PLAUD_REC_SCREEN_S`, default 10 s) to drop the backlight.
+**Deep sleep is implemented but ships DEFAULT OFF (opt-in)** on this board. It
+works — after `OPEN_PLAUD_IDLE_SLEEP_S` (>0) of idle the device sleeps and wakes on
+a Record/Sync press (verified on hardware) — *but* it powers down the
+USB-Serial/JTAG and a deep-sleep **wake does NOT restore it** (only a full reset
+does). This board has **no reset button**, so enabling deep sleep can strand the
+device **un-reflashable + un-USB-recognizable until a battery power-cycle**. So it
+ships **off** (`OPEN_PLAUD_IDLE_SLEEP_S = 0`) until a USJ-restore-on-wake fix lands;
+set it `> 0` only if you accept that trap. (Its sleep *current* was never measured,
+so the months-scale standby below is theoretical.) The screen still blanks while
+recording (`OPEN_PLAUD_REC_SCREEN_S`, default 10 s) to drop the backlight.
 
 Sync (Wi-Fi upload) is the heaviest state but only runs for seconds per clip, so
 it barely affects daily life.
@@ -78,17 +82,23 @@ self-discharge caps useful standby at a few months regardless.
 - **Leave it on the desk, screen on, doing nothing:** dead in **~5 h**. Blank the
   screen (Left button) to roughly double idle endurance.
 
-## Deep sleep (implemented)
+## Deep sleep (implemented, ships DEFAULT OFF / opt-in)
 
-After `OPEN_PLAUD_IDLE_SLEEP_S` (default 60 s) with no button press, the device
-enters ESP32-S3 deep sleep and wakes on an **EXT1 button press**. Verified on
-hardware (2026-06-16): it sleeps, **stays** asleep (no spurious wake), wakes on
-**Record (GPIO4)** and **Sync (GPIO5)**, and does **not** wake on **Left
-(GPIO0)** — GPIO0 is the boot strapping pin, so it is deliberately excluded (held
-low at the wake-reset would drop the chip into ROM download mode). Wake is a full
-reboot (~2 s back to ready); the boot path skips the Wi-Fi retry and SD
-autoformat on a wake so it stays fast and safe. (A nice side-effect: the
-USB-Serial/JTAG port disappears while asleep — handy confirmation it really slept.)
+After `OPEN_PLAUD_IDLE_SLEEP_S` (> 0) with no button press, the device enters
+ESP32-S3 deep sleep and wakes on an **EXT1 button press**. Verified on hardware
+(2026-06-16): it sleeps, **stays** asleep (no spurious wake), wakes on **Record
+(GPIO4)** and **Sync (GPIO5)**, and does **not** wake on **Left (GPIO0)** — GPIO0
+is the boot strapping pin, deliberately excluded.
+
+**Why it ships OFF (`= 0`):** deep sleep powers down the USB-Serial/JTAG, and a
+deep-sleep *wake does not restore it* — only a full reset does. This board has
+**no reset button**, so a slept device is **un-reflashable and un-USB-recognizable
+until you power-cycle the battery** (learned the hard way 2026-06-16). The wake
+also skips Wi-Fi-retry + SD-autoformat for speed, but that doesn't touch the USB
+problem. Until a **USJ-restore-on-wake fix** (e.g. `esp_restart()` on wake to force
+a clean boot, carefully tested so it can't boot-loop on a board you can't reset) is
+in and proven, leave it off. Other power savings (audio only while recording, Wi-Fi
+off after upload, screen blank while recording) are always on regardless.
 
 **Still to measure:** the actual sleep *current*. The ESP32-S3 core sleeps to
 ~tens of µA, but the **board** draw (LDO/charger quiescent, LCD controller) is

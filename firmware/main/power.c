@@ -157,6 +157,11 @@ int power_battery_pct(bool *out_charging)
     return pct;
 }
 
+bool power_is_charging(void)
+{
+    return gpio_get_level(BSP_CHG_STAT_GPIO) == 0;   /* open-drain LOW == charging */
+}
+
 #else  /* no ADC battery pin on this board */
 
 esp_err_t power_init(void)
@@ -171,6 +176,11 @@ int power_battery_pct(bool *out_charging)
         *out_charging = false;
     }
     return -1;
+}
+
+bool power_is_charging(void)
+{
+    return false;
 }
 
 #endif
