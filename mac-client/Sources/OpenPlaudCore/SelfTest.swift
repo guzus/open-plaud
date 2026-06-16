@@ -256,6 +256,42 @@ public enum SelfTest {
             return DeviceDetector.looksLikeOpenPlaudVolume(at: ghost) == nil
         }
 
+        // --- USB VID/PID interpretation (pure; the IOKit read path is App-side) ---
+        check("usb: VID 0x303A is recognized as the open-plaud (Espressif) vendor") {
+            return espressifVendorID == 0x303A
+                && USBInterpreter.isOpenPlaudVendor(0x303A)
+                && !USBInterpreter.isOpenPlaudVendor(0x05AC) // Apple's VID, not ours
+        }
+        check("usb: PID 0x1001 = recorder (USB-Serial/JTAG), exposes no volume") {
+            let m = USBInterpreter.mode(forProductID: 0x1001)
+            return m == .recorder && m.exposesVolume == false
+        }
+        check("usb: PIDs 0x4002 / 0x4003 = drive mode (MSC / MSC+CDC), exposes a volume") {
+            return USBInterpreter.mode(forProductID: 0x4002) == .drive
+                && USBInterpreter.mode(forProductID: 0x4003) == .drive
+                && USBInterpreter.mode(forProductID: 0x4002).exposesVolume == true
+        }
+        check("usb: an unknown PID maps to .unknown (present, no capability claim)") {
+            let m = USBInterpreter.mode(forProductID: 0x9999)
+            return m == .unknown && m.exposesVolume == false
+        }
+        check("usb: device.mode + isEspressif derive from VID/PID") {
+            let recorder = USBDevice(vendorID: 0x303A, productID: 0x1001, productName: nil)
+            let drive = USBDevice(vendorID: 0x303A, productID: 0x4003, productName: nil)
+            let other = USBDevice(vendorID: 0x1234, productID: 0x0001, productName: nil)
+            return recorder.isEspressif && recorder.mode == .recorder
+                && drive.isEspressif && drive.mode == .drive
+                && !other.isEspressif
+        }
+        check("usb: displayName is honest — generic ESP32 unless product says open-plaud") {
+            let generic = USBDevice(vendorID: 0x303A, productID: 0x1001, productName: "USB JTAG/serial debug unit")
+            let branded = USBDevice(vendorID: 0x303A, productID: 0x1001, productName: "open-plaud")
+            let nameless = USBDevice(vendorID: 0x303A, productID: 0x1001, productName: nil)
+            return generic.displayName == "open-plaud device (ESP32)"
+                && branded.displayName == "open-plaud"
+                && nameless.displayName == "open-plaud device (ESP32)"
+        }
+
         // --- Server response decode (tolerant) ---
         check("decode: full Recording (id/status/size/transcript/summary)") {
             let json = """
