@@ -26,6 +26,7 @@ open-plaud/
 ├── firmware/      ESP32-S3 firmware (ESP-IDF) — record, sync over Wi-Fi
 ├── hardware/      BOM, 3D-print case files, pilot PCB notes
 ├── mobile/        iOS on-device transcription package
+├── okf/           Open Knowledge Format bundle for agent-readable project context
 ├── server/        Python pipeline: ingest → transcribe → diarize → summarize
 ├── docs/          Architecture, roadmap, hardware decisions, prior art, research
 └── .github/       CI for server checks
@@ -44,6 +45,11 @@ the box. See `docs/ARCHITECTURE.md` and `docs/ROADMAP.md`.
 
 Related-project research and positioning notes live in `docs/PRIOR_ART.md` and
 `docs/POSITIONING.md`.
+
+Agent-readable project knowledge is available as an Open Knowledge Format v0.1
+bundle in `okf/`. It catalogs the system, components, API, provider contracts,
+data model, and operating workflows with cross-links back to the source docs and
+code.
 
 Current v0 hardware target: **Waveshare ESP32-S3-LCD-1.54 + battery**. It keeps
 the important recorder pieces under $30: dual mic + ES7210 ADC, battery
