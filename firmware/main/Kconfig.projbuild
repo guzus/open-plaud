@@ -90,13 +90,15 @@ menu "open-plaud"
 
     config OPEN_PLAUD_PREPARE_OPUS_SIDECAR
         bool "Prepare Ogg Opus sidecar after recording"
-        default y
+        default n
         depends on OPEN_PLAUD_OPUS_TRANSFERS
         help
             Write rec_NNNN.opus next to rec_NNNN.wav after a clip is saved.
             Sync uploads this sidecar directly, avoiding upload-time encoding.
             WAV remains the queued/archive source so a sidecar failure does not
-            lose audio.
+            lose audio. Keep this off on the current FATFS/stdIO backend: the
+            device cannot safely read the WAV and write an Opus file at the
+            same time.
 
     config OPEN_PLAUD_BLE_COMPANION
         bool "Enable BLE companion service"

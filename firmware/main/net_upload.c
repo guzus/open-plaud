@@ -866,29 +866,9 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
             ESP_LOGI(TAG, "using recorded Opus sidecar %s (%u bytes)",
                      sidecar_opus_path, (unsigned)upload_bytes);
         } else {
-            long opus_size = 0;
-            ESP_LOGI(TAG, "encoding %s to Ogg Opus at %d bps",
-                     path, CONFIG_OPEN_PLAUD_OPUS_BITRATE);
-            err = encode_file_ogg_opus(file, &plan, path, tmp_opus_path,
-                                       sizeof(tmp_opus_path), &opus_size);
-            if (err == ESP_OK && opus_size > 0 && opus_size <= UINT32_MAX &&
-                opus_ogg_upload_filename(path, opus_filename, sizeof(opus_filename)) == ESP_OK) {
-                fclose(file);
-                file = fopen(tmp_opus_path, "rb");
-                if (!file) {
-                    remove(tmp_opus_path);
-                    return ESP_FAIL;
-                }
-                uploading_opus = true;
-                uploading_temp_opus = true;
-                plan.compress_adpcm = false;
-                plan.downmix_stereo16_to_mono = false;
-                upload_bytes = (uint32_t)opus_size;
-            } else {
-                ESP_LOGW(TAG, "Opus encode failed; falling back to ADPCM transfer");
-                plan.compress_opus = false;
-                err = ESP_OK;
-            }
+            ESP_LOGW(TAG, "no Opus sidecar for %s; using ADPCM transfer", path);
+            plan.compress_opus = false;
+            err = ESP_OK;
         }
     }
 
