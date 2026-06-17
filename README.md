@@ -65,6 +65,11 @@ Plaud is much thinner and more finished; the Waveshare board is cheaper,
 open-firmware friendly, and already includes the pieces needed for a working v0
 recorder prototype.
 
+![open-plaud firmware state transition diagram](docs/assets/open-plaud-state-transition-diagram.png)
+
+The firmware LCD states and button transitions are documented in
+[`docs/state-transition-diagram.html`](docs/state-transition-diagram.html).
+
 ## Quick start (server)
 
 This project is **uv-managed**. Install [uv](https://docs.astral.sh/uv/), then:

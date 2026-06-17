@@ -59,3 +59,4 @@ sdkconfig.old
 
 # Claude Code (agent worktrees + local session artifacts)
 .claude/
+.gstack/

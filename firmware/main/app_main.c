@@ -32,6 +32,7 @@
 #include "nvs_flash.h"
 
 #include "audio.h"
+#include "ble_companion.h"
 #include "board.h"
 #include "button.h"
 #include "net_upload.h"
@@ -46,7 +47,8 @@ static const char *TAG = "open-plaud";
 #define BTN_POLL_MS        20
 #define BTN_DEBOUNCE_POLLS 2
 #define IDLE_REFRESH_MS    2000   /* battery/storage footer refresh cadence */
-#define BYTES_PER_SEC      (AUDIO_SAMPLE_RATE * AUDIO_CHANNELS * (AUDIO_BITS / 8))
+#define WAV_CHANNELS       1      /* upload/store mono; capture still uses board-native stereo */
+#define WAV_BYTES_PER_SEC  (AUDIO_SAMPLE_RATE * WAV_CHANNELS * (AUDIO_BITS / 8))
 
 typedef enum { REC_SAVED, REC_CANCELLED, REC_FAILED } record_result_t;
 
@@ -114,13 +116,27 @@ static void retry_pending_clips(const char *context)
     }
 }
 
+static void publish_ble_status(int done, int total, int upload_pct, bool failed,
+                               bool wifi_connected)
+{
+    const open_plaud_ble_status_t ble = {
+        .sync_done = done,
+        .sync_total = total,
+        .upload_pct = upload_pct,
+        .wifi_connected = wifi_connected,
+        .sync_failed = failed,
+    };
+    open_plaud_ble_set_status(&ble);
+}
+
 static void show_idle(int pending)
 {
     const status_info_t info = {
         .pending = pending, .elapsed_s = -1,
-        .sync_done = -1, .sync_total = -1, .clip = NULL,
+        .sync_done = -1, .sync_total = -1, .upload_pct = -1, .clip = NULL,
     };
     status_update(pending > 0 ? OPEN_PLAUD_STATUS_SAVED : OPEN_PLAUD_STATUS_READY, &info);
+    publish_ble_status(-1, -1, -1, false, false);
 }
 
 /* "rec_0007.wav" -> "REC 0007": the on-screen font is uppercase digits/letters
@@ -143,6 +159,24 @@ static void clip_label(const char *base, char *out, size_t n)
     out[j] = '\0';
 }
 
+static size_t pcm_to_mono(const int16_t *in, size_t bytes, int16_t *out, size_t max_frames)
+{
+    size_t frames = bytes / (AUDIO_CHANNELS * sizeof(int16_t));
+    if (frames > max_frames) {
+        frames = max_frames;
+    }
+    for (size_t i = 0; i < frames; i++) {
+#if AUDIO_CHANNELS == 1
+        out[i] = in[i];
+#else
+        const int16_t left = in[(i * AUDIO_CHANNELS) + 0];
+        const int16_t right = in[(i * AUDIO_CHANNELS) + 1];
+        out[i] = (int16_t)(((int32_t)left + (int32_t)right) / 2);
+#endif
+    }
+    return frames;
+}
+
 /* Record one clip to `path`. Toggle semantics: recording was started by a Right
  * press, so we wait for Right to be released, then a second Right press stops
  * and SAVES. A Left press cancels (discards). Auto-stops at
@@ -159,14 +193,15 @@ static record_result_t record_clip(const char *path)
     }
 
     wav_writer_t wav;
-    if (wav_open(&wav, path, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_BITS) != ESP_OK) {
+    if (wav_open(&wav, path, AUDIO_SAMPLE_RATE, WAV_CHANNELS, AUDIO_BITS) != ESP_OK) {
         ESP_LOGE(TAG, "cannot open %s", path);
         audio_deinit();
         return REC_FAILED;
     }
 
-    const size_t max_bytes = (size_t)BYTES_PER_SEC * CONFIG_OPEN_PLAUD_MAX_REC_SECONDS;
+    const size_t max_bytes = (size_t)WAV_BYTES_PER_SEC * CONFIG_OPEN_PLAUD_MAX_REC_SECONDS;
     static int16_t buf[2048];           /* 4 KiB ~= 64 ms at 16 kHz stereo */
+    static int16_t mono[1024];
     size_t written = 0;
     int bad_reads = 0;
     int elapsed_shown = -1;
@@ -228,9 +263,6 @@ static record_result_t record_clip(const char *path)
 
         size_t got = 0;
         size_t want = sizeof buf;
-        if (want > max_bytes - written) {
-            want = max_bytes - written;
-        }
 
         esp_err_t read_err = audio_read(buf, want, &got);
         if (got == 0) {
@@ -247,13 +279,19 @@ static record_result_t record_clip(const char *path)
         }
 
         bad_reads = 0;
-        if (wav_write(&wav, buf, got) != ESP_OK) {
+        size_t frames_left = (max_bytes - written) / sizeof(int16_t);
+        size_t frames = pcm_to_mono(buf, got, mono, frames_left);
+        size_t write_bytes = frames * sizeof(int16_t);
+        if (write_bytes == 0) {
+            break;
+        }
+        if (wav_write(&wav, mono, write_bytes) != ESP_OK) {
             ESP_LOGE(TAG, "SD write failed - stopping clip");
             break;
         }
-        written += got;
+        written += write_bytes;
 
-        const int elapsed = (int)(written / BYTES_PER_SEC);
+        const int elapsed = (int)(written / WAV_BYTES_PER_SEC);
         if (elapsed != elapsed_shown) {
             elapsed_shown = elapsed;
             status_tick_recording(elapsed);
@@ -299,7 +337,7 @@ static void do_record(void)
 
     const status_info_t info = {
         .pending = -1, .elapsed_s = 0,
-        .sync_done = -1, .sync_total = -1, .clip = label,
+        .sync_done = -1, .sync_total = -1, .upload_pct = -1, .clip = label,
     };
     status_update(OPEN_PLAUD_STATUS_RECORDING, &info);
 
@@ -313,14 +351,25 @@ static void do_record(void)
 
 /* Redraw the SYNCING screen after each clip uploads. Safe to redraw fully here:
  * sync runs on the main loop, not the capture task, so no audio is in flight. */
-static void sync_progress(int uploaded, int total, void *ctx)
+static void sync_progress(int uploaded, int total, int current_pct,
+                          const char *clip, void *ctx)
 {
     (void)ctx;
+    char label[16];
+    const char *screen_clip = NULL;
+    if (clip != NULL) {
+        const char *base = strrchr(clip, '/');
+        base = base ? base + 1 : clip;
+        clip_label(base, label, sizeof label);
+        screen_clip = label;
+    }
     const status_info_t info = {
         .pending = total - uploaded, .elapsed_s = -1,
-        .sync_done = uploaded, .sync_total = total, .clip = NULL,
+        .sync_done = uploaded, .sync_total = total,
+        .upload_pct = current_pct, .clip = screen_clip,
     };
     status_update(OPEN_PLAUD_STATUS_SYNCING, &info);
+    publish_ble_status(uploaded, total, current_pct, false, true);
 }
 
 /* Middle button: upload the queue oldest-first. Blocks (Wi-Fi + uploads), which
@@ -330,7 +379,7 @@ static void do_sync(int pending)
     if (pending <= 0) {
         const status_info_t done = {
             .pending = 0, .elapsed_s = -1,
-            .sync_done = 0, .sync_total = 0, .clip = NULL,
+            .sync_done = 0, .sync_total = 0, .upload_pct = -1, .clip = NULL,
         };
         status_update(OPEN_PLAUD_STATUS_DONE, &done);
         return;
@@ -338,9 +387,10 @@ static void do_sync(int pending)
 
     const status_info_t syncing = {
         .pending = pending, .elapsed_s = -1,
-        .sync_done = 0, .sync_total = pending, .clip = NULL,
+        .sync_done = 0, .sync_total = pending, .upload_pct = 0, .clip = NULL,
     };
     status_update(OPEN_PLAUD_STATUS_SYNCING, &syncing);
+    publish_ble_status(0, pending, 0, false, false);
 
     bool failed = false;
     const int uploaded = rec_store_retry_pending(&failed, sync_progress, NULL);
@@ -350,9 +400,10 @@ static void do_sync(int pending)
     const int remaining = rec_store_pending_count();
     const status_info_t result = {
         .pending = remaining, .elapsed_s = -1,
-        .sync_done = uploaded, .sync_total = pending, .clip = NULL,
+        .sync_done = uploaded, .sync_total = pending, .upload_pct = -1, .clip = NULL,
     };
     status_update(remaining > 0 ? OPEN_PLAUD_STATUS_OFFLINE : OPEN_PLAUD_STATUS_DONE, &result);
+    publish_ble_status(uploaded, pending, -1, failed || remaining > 0, false);
 }
 
 void app_main(void)
@@ -366,6 +417,12 @@ void app_main(void)
     if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ESP_ERROR_CHECK(nvs_flash_init());
+    }
+    esp_err_t ble = open_plaud_ble_start();
+    if (ble == ESP_OK) {
+        ESP_LOGI(TAG, "BLE companion service started");
+    } else if (ble != ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "BLE companion service unavailable: %s", esp_err_to_name(ble));
     }
 
     /* A deep-sleep wake is a full reboot. When we woke from a button, skip the
@@ -413,7 +470,14 @@ void app_main(void)
     TickType_t last_refresh = xTaskGetTickCount();
     TickType_t last_activity = last_refresh;
     while (true) {
-        if (btn_poll_edge(BTN_RECORD)) {
+        open_plaud_ble_command_t ble_cmd = OPEN_PLAUD_BLE_COMMAND_NONE;
+        if (open_plaud_ble_take_command(&ble_cmd) && ble_cmd == OPEN_PLAUD_BLE_COMMAND_SYNC) {
+            ensure_screen_on();
+            do_sync(pending);
+            btn_resync();
+            pending = rec_store_pending_count();
+            last_refresh = last_activity = xTaskGetTickCount();
+        } else if (btn_poll_edge(BTN_RECORD)) {
             ensure_screen_on();
             do_record();
             btn_resync();

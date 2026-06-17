@@ -21,6 +21,11 @@ Live PoC: **https://openplaud.guzus.xyz**
 | `GET`  | `/` | HTML list of recordings |
 | `GET`  | `/rec/{id}` | recording detail: audio player, transcript, summary |
 
+`POST /v1/recordings` accepts ordinary audio uploads and the Open Plaud ADPCM
+container (`.opadpcm`, `application/vnd.openplaud.adpcm`). ADPCM uploads are
+decoded immediately and stored as normal 16-bit PCM WAV, so playback, export,
+Deepgram, and existing clients continue to see WAV.
+
 `Recording` JSON matches the Python `RecordingResponse` field-for-field
 (`id, status, filename, size_bytes, created_at, transcript, summary, error`).
 `status` walks `received → transcribing → summarizing → done` (or `failed` if
@@ -44,6 +49,17 @@ Config (env): `PORT` (default 8000), `OP_STORAGE_DIR` (default `/data`),
 (default `nova-3`), `FIREWORKS_API_KEY` (default empty = summarization off),
 `FIREWORKS_MODEL` (default `accounts/fireworks/models/kimi-k2p7-code`). No external dependencies, no
 database — each upload is a blob `{id}{ext}` + sidecar `{id}.json` in the storage dir.
+
+## Open Plaud ADPCM container
+
+The compressed upload path is dependency-free and server-normalized:
+
+- Suffix/content type: `.opadpcm` or `application/vnd.openplaud.adpcm`
+- Magic: `OPADPCM1`
+- Header: little-endian `uint32 sample_rate`, `uint16 channels`, `uint32 samples_per_channel`
+- Per channel state: `int16 predictor`, `uint8 ima_step_index`, `uint8 reserved_zero`
+- Payload: IMA ADPCM nibbles, low nibble first, interleaved by frame/channel
+- Stored result: ordinary `.wav` with `content_type: audio/wav`
 
 ## Transcription (Deepgram)
 

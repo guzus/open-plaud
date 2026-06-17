@@ -27,6 +27,12 @@ set it `> 0` only if you accept that trap. (Its sleep *current* was never measur
 so the months-scale standby below is theoretical.) The screen still blanks while
 recording (`OPEN_PLAUD_REC_SCREEN_S`, default 10 s) to drop the backlight.
 
+On the Waveshare LCD-1.54 board, battery operation also depends on `BAT_EN`
+(GPIO2): the physical PWR button gives temporary battery power, and firmware must
+drive `BAT_EN` high to keep the board alive after the button is released. The
+firmware holds it high at boot and enables GPIO deep-sleep hold so battery power
+stays latched while unplugged.
+
 Sync (Wi-Fi upload) is the heaviest state but only runs for seconds per clip, so
 it barely affects daily life.
 
@@ -114,6 +120,9 @@ the "months" estimate into a real number. Also confirm the Waveshare
   boot-retry and after each Sync (driver stays initialized for fast reconnect).
 - **Screen blanking** — the Left/Power button turns the LCD backlight off/on; the
   backlight is the dominant idle load.
+- **Battery power hold** — on the Waveshare LCD-1.54 board, GPIO2 / `BAT_EN` is
+  driven high and held through deep sleep so unplugged battery operation survives
+  releasing the physical PWR button.
 - Deferred sync means the radio only comes up when **you** press Sync (or on boot
   if Wi-Fi is in range), not on every clip.
 

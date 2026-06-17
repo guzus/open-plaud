@@ -26,6 +26,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -57,6 +58,12 @@ var audioMediaTypes = map[string]bool{
 	"audio/wav": true, "audio/x-wav": true,
 	"audio/flac": true, "audio/mpeg": true, "audio/mp4": true,
 }
+
+const (
+	openPlaudADPCMSuffix      = ".opadpcm"
+	openPlaudADPCMContentType = "application/vnd.openplaud.adpcm"
+	openPlaudADPCMMagic       = "OPADPCM1"
+)
 
 const (
 	authSessionCookieName = "op_session"
@@ -360,7 +367,13 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		id := newID()
+		contentType := part.Header.Get("Content-Type")
+		compressed := isOpenPlaudADPCMUpload(filename, contentType)
 		suffix := safeSuffix(filename)
+		if compressed {
+			suffix = ".wav"
+			contentType = "audio/wav"
+		}
 		storedName := id + suffix
 		blobPath := filepath.Join(s.storageDir, storedName)
 
@@ -370,13 +383,21 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusInternalServerError, "cannot store upload")
 			return
 		}
-		// Copy at most maxBytes+1 so we can tell "exactly at limit" from "over".
-		size, err := io.Copy(out, io.LimitReader(part, s.maxBytes+1))
+		var size int64
+		if compressed {
+			size, err = decodeOpenPlaudADPCMToWAV(out, part, s.maxBytes, s.maxBytes)
+		} else {
+			// Copy at most maxBytes+1 so we can tell "exactly at limit" from "over".
+			size, err = io.Copy(out, io.LimitReader(part, s.maxBytes+1))
+		}
 		closeErr := out.Close()
 		if err != nil {
 			_ = os.Remove(blobPath)
-			// MaxBytesReader / LimitReader tripping both surface as a read error here.
-			httpError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("upload exceeds %d bytes", s.maxBytes))
+			if errors.Is(err, errUploadTooLarge) || !compressed {
+				httpError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("upload exceeds %d bytes", s.maxBytes))
+			} else {
+				httpError(w, http.StatusBadRequest, err.Error())
+			}
 			return
 		}
 		if closeErr != nil {
@@ -398,10 +419,10 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		rec := Recording{
 			ID:          id,
 			Status:      "received",
-			Filename:    cleanFilename(filename, storedName),
+			Filename:    cleanFilename(normalizedFilename(filename, compressed), storedName),
 			SizeBytes:   size,
 			CreatedAt:   time.Now().UTC(),
-			ContentType: part.Header.Get("Content-Type"),
+			ContentType: contentType,
 			StoredName:  storedName,
 		}
 		if err := s.writeMeta(rec); err != nil {
@@ -664,6 +685,233 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
+// ---- Open Plaud ADPCM ingest ------------------------------------------------
+
+var errUploadTooLarge = errors.New("upload too large")
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	r.n += int64(n)
+	return n, err
+}
+
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	w.n += int64(n)
+	return n, err
+}
+
+type adpcmNibbleReader struct {
+	r       io.Reader
+	current byte
+	high    bool
+}
+
+func (r *adpcmNibbleReader) next() (byte, error) {
+	if !r.high {
+		var b [1]byte
+		if _, err := io.ReadFull(r.r, b[:]); err != nil {
+			return 0, err
+		}
+		r.current = b[0]
+		r.high = true
+		return r.current & 0x0f, nil
+	}
+	r.high = false
+	return r.current >> 4, nil
+}
+
+type adpcmState struct {
+	predictor int
+	index     int
+}
+
+// decodeOpenPlaudADPCMToWAV reads the dependency-free Open Plaud ADPCM
+// container and writes canonical 16-bit little-endian PCM WAV. The container is:
+//
+//	8 bytes   "OPADPCM1"
+//	uint32    sample rate, little-endian
+//	uint16    channel count (1 or 2)
+//	uint32    samples per channel, including the predictor sample
+//	repeated per channel:
+//	  int16   initial predictor PCM sample
+//	  uint8   initial IMA step index
+//	  uint8   reserved, must be 0
+//	nibbles   IMA ADPCM samples, low nibble first, interleaved by frame/channel
+func decodeOpenPlaudADPCMToWAV(dst io.Writer, src io.Reader, maxInputBytes, maxOutputBytes int64) (int64, error) {
+	lr := &io.LimitedReader{R: src, N: maxInputBytes + 1}
+	cr := &countingReader{r: lr}
+
+	var magic [8]byte
+	if _, err := io.ReadFull(cr, magic[:]); err != nil {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM header: %w", err)
+	}
+	if string(magic[:]) != openPlaudADPCMMagic {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM magic")
+	}
+
+	var sampleRate uint32
+	var channels uint16
+	var samplesPerChannel uint32
+	if err := binary.Read(cr, binary.LittleEndian, &sampleRate); err != nil {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM sample rate: %w", err)
+	}
+	if err := binary.Read(cr, binary.LittleEndian, &channels); err != nil {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM channels: %w", err)
+	}
+	if err := binary.Read(cr, binary.LittleEndian, &samplesPerChannel); err != nil {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM sample count: %w", err)
+	}
+	if sampleRate == 0 || sampleRate > 192000 {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM sample rate %d", sampleRate)
+	}
+	if channels == 0 || channels > 2 {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM channel count %d", channels)
+	}
+	if samplesPerChannel == 0 {
+		return 0, fmt.Errorf("invalid Open Plaud ADPCM empty audio")
+	}
+
+	dataBytes := int64(samplesPerChannel) * int64(channels) * 2
+	if dataBytes > int64(^uint32(0))-36 || dataBytes+44 > maxOutputBytes {
+		return 0, errUploadTooLarge
+	}
+
+	states := make([]adpcmState, int(channels))
+	for i := range states {
+		var predictor int16
+		var state [2]byte
+		if err := binary.Read(cr, binary.LittleEndian, &predictor); err != nil {
+			return 0, fmt.Errorf("invalid Open Plaud ADPCM predictor: %w", err)
+		}
+		if _, err := io.ReadFull(cr, state[:]); err != nil {
+			return 0, fmt.Errorf("invalid Open Plaud ADPCM state: %w", err)
+		}
+		if state[0] >= byte(len(imaStepTable)) {
+			return 0, fmt.Errorf("invalid Open Plaud ADPCM step index %d", state[0])
+		}
+		if state[1] != 0 {
+			return 0, fmt.Errorf("invalid Open Plaud ADPCM reserved byte")
+		}
+		states[i] = adpcmState{predictor: int(predictor), index: int(state[0])}
+	}
+
+	cw := &countingWriter{w: dst}
+	if err := writeWAVHeader(cw, sampleRate, channels, uint32(dataBytes)); err != nil {
+		return cw.n, err
+	}
+	for ch := range states {
+		if err := binary.Write(cw, binary.LittleEndian, int16(states[ch].predictor)); err != nil {
+			return cw.n, err
+		}
+	}
+
+	nibbles := &adpcmNibbleReader{r: cr}
+	for sample := uint32(1); sample < samplesPerChannel; sample++ {
+		for ch := range states {
+			code, err := nibbles.next()
+			if err != nil {
+				return cw.n, fmt.Errorf("truncated Open Plaud ADPCM payload: %w", err)
+			}
+			pcm := decodeIMANibble(&states[ch], code)
+			if err := binary.Write(cw, binary.LittleEndian, int16(pcm)); err != nil {
+				return cw.n, err
+			}
+		}
+	}
+
+	trailing, err := io.Copy(io.Discard, cr)
+	if cr.n > maxInputBytes {
+		return cw.n, errUploadTooLarge
+	}
+	if err != nil {
+		return cw.n, err
+	}
+	if trailing > 0 {
+		return cw.n, fmt.Errorf("invalid Open Plaud ADPCM trailing data")
+	}
+	return cw.n, nil
+}
+
+func writeWAVHeader(w io.Writer, sampleRate uint32, channels uint16, dataBytes uint32) error {
+	byteRate := sampleRate * uint32(channels) * 2
+	blockAlign := channels * 2
+	header := make([]byte, 44)
+	copy(header[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(header[4:8], 36+dataBytes)
+	copy(header[8:12], "WAVE")
+	copy(header[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(header[16:20], 16)
+	binary.LittleEndian.PutUint16(header[20:22], 1)
+	binary.LittleEndian.PutUint16(header[22:24], channels)
+	binary.LittleEndian.PutUint32(header[24:28], sampleRate)
+	binary.LittleEndian.PutUint32(header[28:32], byteRate)
+	binary.LittleEndian.PutUint16(header[32:34], blockAlign)
+	binary.LittleEndian.PutUint16(header[34:36], 16)
+	copy(header[36:40], "data")
+	binary.LittleEndian.PutUint32(header[40:44], dataBytes)
+	_, err := w.Write(header)
+	return err
+}
+
+func decodeIMANibble(s *adpcmState, code byte) int {
+	step := imaStepTable[s.index]
+	diff := step >> 3
+	if code&1 != 0 {
+		diff += step >> 2
+	}
+	if code&2 != 0 {
+		diff += step >> 1
+	}
+	if code&4 != 0 {
+		diff += step
+	}
+	if code&8 != 0 {
+		s.predictor -= diff
+	} else {
+		s.predictor += diff
+	}
+	if s.predictor > 32767 {
+		s.predictor = 32767
+	} else if s.predictor < -32768 {
+		s.predictor = -32768
+	}
+	s.index += imaIndexTable[code&0x0f]
+	if s.index < 0 {
+		s.index = 0
+	} else if s.index >= len(imaStepTable) {
+		s.index = len(imaStepTable) - 1
+	}
+	return s.predictor
+}
+
+var imaIndexTable = [16]int{
+	-1, -1, -1, -1, 2, 4, 6, 8,
+	-1, -1, -1, -1, 2, 4, 6, 8,
+}
+
+var imaStepTable = [89]int{
+	7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
+	19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+	50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
+	130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
+	337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
+	876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+	2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
+	5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+	15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
+}
+
 func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		httpError(w, http.StatusNotFound, "not found")
@@ -845,6 +1093,9 @@ func (s *server) listMeta() ([]Recording, error) {
 // ---- helpers ----------------------------------------------------------------
 
 func supportedUpload(filename, contentType string) bool {
+	if isOpenPlaudADPCMUpload(filename, contentType) {
+		return true
+	}
 	if _, ok := audioSuffixes[strings.ToLower(filepath.Ext(filename))]; ok {
 		return true
 	}
@@ -877,6 +1128,22 @@ func cleanFilename(filename, fallback string) string {
 		return fallback
 	}
 	return base
+}
+
+func isOpenPlaudADPCMUpload(filename, contentType string) bool {
+	return strings.EqualFold(filepath.Ext(filename), openPlaudADPCMSuffix) ||
+		strings.EqualFold(contentType, openPlaudADPCMContentType)
+}
+
+func normalizedFilename(filename string, compressed bool) string {
+	if !compressed {
+		return filename
+	}
+	ext := filepath.Ext(filename)
+	if ext == "" {
+		return filename + ".wav"
+	}
+	return strings.TrimSuffix(filename, ext) + ".wav"
 }
 
 func newID() string {

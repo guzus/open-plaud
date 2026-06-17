@@ -2,15 +2,18 @@
  * Battery percentage and charge status for the status UI.
  *
  * The Waveshare board ties the cell to an ADC pin (BSP_BAT_ADC_GPIO) through a
- * resistor divider gated by BSP_BAT_EN_GPIO, with a charge-status line on
- * BSP_CHG_STAT_GPIO. ADC1 is used on purpose: ADC2 is shared with Wi-Fi and
- * returns errors while the radio is up (i.e. during upload).
+ * fixed resistor divider and exposes BAT_EN on BSP_BAT_EN_GPIO. BAT_EN is not an
+ * ADC gate: it is the battery power-hold line. When running from the cell the PWR
+ * button only gives temporary power; firmware must drive BAT_EN high and keep it
+ * high, otherwise the board turns off as soon as the button is released. ADC1 is
+ * used on purpose: ADC2 is shared with Wi-Fi and returns errors while the radio is
+ * up (i.e. during upload).
  *
  * CALIBRATED on hardware (2026-06-16): the divider is 3:1 (BAT_DIVIDER 3.0) —
- * the ADC reads ~1374 mV for a ~4.12 V cell on USB. EN (active-high) and the
- * charge-stat pin behave as assumed. The percent map (3300 mV = 0%, 4200 mV =
- * 100%) is still a coarse LiPo approximation; an implausible reading degrades to
- * "unknown" (-1) rather than a wrong number.
+ * the ADC reads ~1374 mV for a ~4.12 V cell on USB. Charge-stat polarity behaves
+ * as assumed. The percent map (3300 mV = 0%, 4200 mV = 100%) is still a coarse
+ * LiPo approximation; an implausible reading degrades to "unknown" (-1) rather
+ * than a wrong number.
  *
  * Boards without an ADC battery pin (e.g. the custom Rev A, which has an I2C
  * fuel gauge) compile the stub and always report "unknown".
@@ -33,10 +36,10 @@ static const char *TAG = "power";
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
-/* ---- Calibratable constants (see UNVERIFIED note above) ----------------- */
+/* ---- Calibratable constants --------------------------------------------- */
 #define BAT_DIVIDER          3.0f   /* Vbat = Vadc * BAT_DIVIDER; 3:1 divider, */
                                     /* calibrated on HW 2026-06-16 (adc 1374mV -> 4.12V on USB) */
-#define BAT_EN_ACTIVE_LEVEL  1      /* drive EN to this to connect divider   */
+#define BAT_EN_ACTIVE_LEVEL  1      /* hold battery power on while unplugged */
 #define BAT_FULL_MV          4200   /* LiPo full                             */
 #define BAT_EMPTY_MV         3300   /* LiPo empty (under light load)         */
 #define BAT_PLAUSIBLE_MIN_MV 2500   /* below this: divider off / no battery  */
@@ -55,8 +58,8 @@ static bool s_ready;
 
 esp_err_t power_init(void)
 {
-    /* EN as output (parked inactive — only enabled around a read), charge-stat
-     * as input with a pull-up (open-drain LOW == charging on most chargers). */
+    /* BAT_EN as output and held active. On battery power this is the latch that
+     * keeps the board alive after the physical PWR button is released. */
     gpio_config_t en = {
         .pin_bit_mask = 1ULL << BSP_BAT_EN_GPIO,
         .mode = GPIO_MODE_OUTPUT,
@@ -68,8 +71,12 @@ esp_err_t power_init(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "bat-en gpio config failed: %s", esp_err_to_name(err));
     }
-    gpio_set_level(BSP_BAT_EN_GPIO, !BAT_EN_ACTIVE_LEVEL);
+    gpio_set_level(BSP_BAT_EN_GPIO, BAT_EN_ACTIVE_LEVEL);
+    gpio_hold_en(BSP_BAT_EN_GPIO);
+    gpio_deep_sleep_hold_en();
 
+    /* Charge-stat as input with a pull-up (open-drain LOW == charging on most
+     * chargers). */
     gpio_config_t chg = {
         .pin_bit_mask = 1ULL << BSP_CHG_STAT_GPIO,
         .mode = GPIO_MODE_INPUT,
@@ -125,7 +132,6 @@ int power_battery_pct(bool *out_charging)
         return -1;
     }
 
-    gpio_set_level(BSP_BAT_EN_GPIO, BAT_EN_ACTIVE_LEVEL);
     vTaskDelay(pdMS_TO_TICKS(BAT_SETTLE_MS));
 
     int acc = 0, ok = 0;
@@ -136,7 +142,6 @@ int power_battery_pct(bool *out_charging)
             ok++;
         }
     }
-    gpio_set_level(BSP_BAT_EN_GPIO, !BAT_EN_ACTIVE_LEVEL);
     if (ok == 0) {
         return -1;
     }

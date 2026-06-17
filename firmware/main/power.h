@@ -3,8 +3,8 @@
 #include "esp_err.h"
 
 /* Battery / charge sensing. On the Waveshare board the cell is read through a
- * resistor divider on an ADC pin; the divider ratio is unverified, so the
- * percentage is approximate and calibratable in power.c. */
+ * resistor divider on an ADC pin, and BAT_EN is held high so battery power stays
+ * latched after the physical PWR button is released. */
 esp_err_t power_init(void);
 
 /* Battery charge as 0..100, or -1 when unknown (no sensor, ADC unavailable, or

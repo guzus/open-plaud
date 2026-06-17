@@ -26,7 +26,7 @@ static const char *TAG = "status";
 
 /* Shared across LCD + RGB builds so the public API has one source of truth. */
 static open_plaud_status_t s_status = OPEN_PLAUD_STATUS_BOOT;
-static status_info_t s_info = { -1, -1, -1, -1, NULL };
+static status_info_t s_info = { -1, -1, -1, -1, -1, NULL };
 static char s_clip[20];   /* owns the clip name; callers' pointers may dangle */
 
 #if BSP_HAS_LCD
@@ -409,7 +409,7 @@ static void lcd_draw_full(open_plaud_status_t status, const status_info_t *info)
     lcd_fill_rect(UI_CARD_X, UI_CARD_Y, UI_CARD_W, UI_CARD_H, UI_COLOR_CARD);
     lcd_fill_rect(UI_CARD_X, UI_CARD_Y, UI_CARD_W, 4, accent);
 
-    char detail[32];
+    char detail[48];
     detail[0] = '\0';
 
     switch (status) {
@@ -442,12 +442,17 @@ static void lcd_draw_full(open_plaud_status_t status, const status_info_t *info)
     case OPEN_PLAUD_STATUS_SYNCING:
         lcd_draw_text_centered(UI_TITLE_Y, "SYNCING", 5, accent, UI_COLOR_CARD);
         if (info && info->sync_total > 0) {
-            snprintf(detail, sizeof detail, "%d OF %d",
-                     info->sync_done < 0 ? 0 : info->sync_done, info->sync_total);
+            const int done = info->sync_done < 0 ? 0 : info->sync_done;
+            const int active = info->upload_pct < 0 ? 0 : info->upload_pct;
+            if (info->upload_pct >= 0 && done < info->sync_total) {
+                snprintf(detail, sizeof detail, "%d/%d %d%%",
+                         done, info->sync_total, active);
+            } else {
+                snprintf(detail, sizeof detail, "%d OF %d", done, info->sync_total);
+            }
             lcd_draw_text_centered(UI_DETAIL_Y, detail, 3, UI_COLOR_TEXT, UI_COLOR_CARD);
-            int pct = info->sync_total > 0
-                ? (info->sync_done < 0 ? 0 : info->sync_done) * 100 / info->sync_total
-                : 0;
+            int pct = (done * 100 + active) / info->sync_total;
+            if (pct > 100) pct = 100;
             draw_bar(pct, accent);
         } else {
             lcd_draw_text_centered(UI_DETAIL_Y, "UPLOADING", 3, UI_COLOR_TEXT, UI_COLOR_CARD);
@@ -621,7 +626,7 @@ void status_update(open_plaud_status_t status, const status_info_t *info)
             s_info.clip = NULL;
         }
     } else {
-        s_info = (status_info_t){ -1, -1, -1, -1, NULL };
+        s_info = (status_info_t){ -1, -1, -1, -1, -1, NULL };
     }
     ESP_LOGI(TAG, "status: %s", status_name(status));
 #if BSP_HAS_LCD

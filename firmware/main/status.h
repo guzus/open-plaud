@@ -22,6 +22,7 @@ typedef struct {
     int elapsed_s;    /* recording elapsed seconds (RECORDING)           */
     int sync_done;    /* clips uploaded so far this sync (SYNCING/DONE)  */
     int sync_total;   /* clips this sync started with                    */
+    int upload_pct;   /* active clip upload percent (SYNCING), or -1     */
     const char *clip; /* active clip basename, e.g. "REC_0007"           */
 } status_info_t;
 

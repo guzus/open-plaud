@@ -127,7 +127,7 @@
 
 #define BSP_PA_CTRL_GPIO      7    /* speaker amp enable (playback)           */
 #define BSP_BAT_ADC_GPIO      1
-#define BSP_BAT_EN_GPIO       2
+#define BSP_BAT_EN_GPIO       2    /* battery power-hold latch, active high */
 #define BSP_CHG_STAT_GPIO     3
 
 #endif

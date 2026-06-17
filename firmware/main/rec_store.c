@@ -26,6 +26,31 @@ static const char *TAG = "rec_store";
 #define SENT_DIR        SDCARD_MOUNT_POINT "/sent"
 #define REC_NUM_MAX     9999u  /* rec_0001 .. rec_9999 — 8.3-safe names */
 #define RETRY_BATCH_MAX 64     /* pending clips retried per boot */
+#define WAV_HEADER_BYTES 44
+
+typedef struct {
+    rec_store_progress_fn progress;
+    void *ctx;
+    int uploaded;
+    int total;
+    int last_pct;
+} upload_progress_ctx_t;
+
+static void upload_progress(const char *path, int sent_bytes, int total_bytes, void *ctx)
+{
+    upload_progress_ctx_t *p = (upload_progress_ctx_t *)ctx;
+    if (!p || !p->progress || total_bytes <= 0) {
+        return;
+    }
+    int pct = sent_bytes * 100 / total_bytes;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    if (pct == p->last_pct || (pct < 100 && pct - p->last_pct < 5)) {
+        return;
+    }
+    p->last_pct = pct;
+    p->progress(p->uploaded, p->total, pct, path, p->ctx);
+}
 
 /* Match "rec_NNNN.wav" case-insensitively: FATFS is a case-insensitive
  * filesystem, and with long-filename support off it stores 8.3 names
@@ -167,7 +192,32 @@ int rec_store_retry_pending(bool *out_upload_failed,
     for (size_t i = 0; i < count; i++) {
         char path[32];
         snprintf(path, sizeof path, SDCARD_MOUNT_POINT "/rec_%04u.wav", pending[i]);
-        if (net_upload_wav(path) != ESP_OK) {
+        struct stat st;
+        if (stat(path, &st) == 0 && st.st_size <= WAV_HEADER_BYTES) {
+            ESP_LOGW(TAG, "discarding empty clip %s (%ld bytes)", path, (long)st.st_size);
+            if (remove(path) != 0) {
+                ESP_LOGE(TAG, "remove(%s) failed: errno=%d", path, errno);
+                if (out_upload_failed) *out_upload_failed = true;
+                break;
+            }
+            uploaded++;
+            if (progress) {
+                progress(uploaded, (int)count, -1, NULL, ctx);
+            }
+            continue;
+        }
+
+        upload_progress_ctx_t progress_ctx = {
+            .progress = progress,
+            .ctx = ctx,
+            .uploaded = uploaded,
+            .total = (int)count,
+            .last_pct = -5,
+        };
+        if (progress) {
+            progress(uploaded, (int)count, 0, path, ctx);
+        }
+        if (net_upload_wav(path, upload_progress, &progress_ctx) != ESP_OK) {
             ESP_LOGW(TAG, "retry stopped at %s — %u clip(s) stay queued",
                      path, (unsigned)(count - i));
             if (out_upload_failed) *out_upload_failed = true;
@@ -179,7 +229,7 @@ int rec_store_retry_pending(bool *out_upload_failed,
         }
         uploaded++;
         if (progress) {
-            progress(uploaded, (int)count, ctx);
+            progress(uploaded, (int)count, -1, NULL, ctx);
         }
     }
     return uploaded;

@@ -57,6 +57,32 @@ menu "open-plaud"
         default 30000
         range 5000 300000
 
+    config OPEN_PLAUD_COMPRESS_TRANSFERS
+        bool "Compress Wi-Fi/BLE transfer payloads with Open Plaud ADPCM"
+        default n
+        help
+            Encode canonical 16-bit PCM WAV clips into the small Open Plaud ADPCM
+            transfer container before upload. The server must support
+            application/vnd.openplaud.adpcm and decode it back to PCM WAV before
+            transcription/storage. Leave off when targeting older servers.
+
+    config OPEN_PLAUD_BLE_COMPANION
+        bool "Enable BLE companion service"
+        default n
+        depends on SOC_BT_SUPPORTED && BT_ENABLED && BT_NIMBLE_ENABLED && BT_CONTROLLER_ENABLED
+        select BT_NIMBLE_ROLE_PERIPHERAL
+        select BT_NIMBLE_ROLE_BROADCASTER
+        help
+            Adds the Open Plaud BLE GATT service for an iPhone companion app.
+            BLE is for setup/control/status and resumable chunk transfer; Wi-Fi
+            remains the primary cloud sync path. Enable Bluetooth -> NimBLE in
+            menuconfig first.
+
+    config OPEN_PLAUD_BLE_DEVICE_NAME
+        string "BLE companion device name"
+        default "Open Plaud"
+        depends on OPEN_PLAUD_BLE_COMPANION
+
     config OPEN_PLAUD_MAX_REC_SECONDS
         int "Max clip length in seconds"
         default 1800

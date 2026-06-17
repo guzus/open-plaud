@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>open-plaud firmware state transition diagram</title>
+  <style>
+    :root {
+      --page: #f5f7fb;
+      --ink: #17202a;
+      --muted: #5d6876;
+      --line: #adb7c5;
+      --lcd-bg: #090b0d;
+      --lcd-header: #191c20;
+      --lcd-card: #101215;
+      --lcd-text: #f2f4f8;
+      --lcd-muted: #78808a;
+      --lcd-dim: #40464e;
+      --boot: #3489ff;
+      --ready: #2bd68e;
+      --recording: #ff4058;
+      --syncing: #5ab0ff;
+      --done: #44cee6;
+      --offline: #ffb74d;
+      --error: #ff52b4;
+      --rec-hint: #ff4fa3;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: 1600px;
+      height: 900px;
+      margin: 0 auto;
+      padding: 34px 40px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.35;
+      max-width: 900px;
+    }
+
+    .diagram {
+      position: relative;
+      width: 1520px;
+      height: 720px;
+      margin-top: 24px;
+    }
+
+    .arrows {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      marker-end: url(#arrowhead);
+    }
+
+    .arrow.power {
+      stroke: #8490a1;
+      stroke-dasharray: 9 8;
+    }
+
+    .edge-label {
+      fill: #3a4655;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .node {
+      position: absolute;
+      z-index: 1;
+      width: 214px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .node-title {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.15;
+    }
+
+    .node-title span:last-child {
+      display: none;
+    }
+
+    .lcd {
+      width: 214px;
+      aspect-ratio: 1;
+      background: var(--lcd-bg);
+      border: 5px solid #d9dee6;
+      border-radius: 16px;
+      box-shadow: 0 14px 24px rgb(15 23 42 / 0.16);
+      overflow: hidden;
+      position: relative;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      letter-spacing: 0;
+    }
+
+    .hints {
+      height: 28px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      background: var(--lcd-header);
+      align-items: center;
+    }
+
+    .hint {
+      text-align: center;
+      color: var(--lcd-muted);
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .hint.dim { color: var(--lcd-dim); }
+    .hint.rec { color: var(--rec-hint); }
+    .hint.red { color: var(--recording); }
+    .hint.sync { color: var(--syncing); }
+
+    .panel {
+      position: absolute;
+      left: 10px;
+      top: 36px;
+      width: calc(100% - 20px);
+      height: 148px;
+      background: var(--lcd-card);
+      border-radius: 9px;
+    }
+
+    .title {
+      position: absolute;
+      top: 14px;
+      width: 100%;
+      text-align: center;
+      font-size: 34px;
+      font-weight: 900;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .title.long {
+      font-size: 28px;
+      top: 18px;
+    }
+
+    .detail {
+      position: absolute;
+      top: 64px;
+      width: 100%;
+      text-align: center;
+      color: var(--lcd-text);
+      font-size: 20px;
+      font-weight: 900;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .detail.small {
+      font-size: 15px;
+    }
+
+    .sub {
+      position: absolute;
+      top: 104px;
+      width: 100%;
+      text-align: center;
+      color: var(--lcd-muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .bar {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 18px;
+      height: 10px;
+      background: #2d333b;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .bar i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+    }
+
+    .footer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 8px;
+      text-align: center;
+      color: var(--lcd-muted);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .screen-off {
+      background: #030405;
+    }
+
+    .screen-off .off-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #3f4650;
+      font-size: 16px;
+      font-weight: 900;
+    }
+
+    .deep-sleep .off-label {
+      color: #2f3741;
+    }
+
+    .caption {
+      display: none;
+    }
+
+    .boot { left: 34px; top: 40px; }
+    .ready { left: 332px; top: 40px; }
+    .recording { left: 630px; top: 40px; }
+    .saved { left: 928px; top: 40px; }
+    .syncing { left: 1226px; top: 40px; }
+    .done { left: 1226px; top: 430px; }
+    .offline { left: 928px; top: 430px; }
+    .error { left: 630px; top: 430px; }
+    .off { left: 332px; top: 430px; }
+    .sleep { left: 34px; top: 430px; }
+
+    .legend {
+      display: none;
+    }
+
+    .legend strong {
+      color: var(--ink);
+    }
+
+    .source {
+      position: absolute;
+      right: 40px;
+      top: 42px;
+      color: #6d7785;
+      font-size: 12px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>open-plaud firmware state transitions</h1>
+    <p class="subtitle">Firmware state map with the real LCD titles, hint rows, accent colors, progress bars, and footer style.</p>
+
+    <section class="diagram" aria-label="open-plaud firmware state transition diagram">
+      <svg class="arrows" viewBox="0 0 1520 960" role="img" aria-label="State transition arrows">
+        <defs>
+          <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+            <path d="M 0 0 L 12 6 L 0 12 z" fill="#adb7c5"></path>
+          </marker>
+        </defs>
+
+        <path class="arrow" d="M 248 160 C 280 160 292 160 324 160"></path>
+        <text class="edge-label" x="276" y="146">ok</text>
+
+        <path class="arrow" d="M 546 160 C 578 160 590 160 622 160"></path>
+        <text class="edge-label" x="562" y="146">REC</text>
+
+        <path class="arrow" d="M 844 160 C 876 160 888 160 920 160"></path>
+        <text class="edge-label" x="862" y="146">STOP</text>
+
+        <path class="arrow" d="M 1142 160 C 1174 160 1186 160 1218 160"></path>
+        <text class="edge-label" x="1152" y="146">SYNC</text>
+
+        <path class="arrow" d="M 1334 274 C 1334 326 1334 368 1334 422"></path>
+        <text class="edge-label" x="1358" y="350">done</text>
+
+        <path class="arrow" d="M 1226 538 C 1190 538 1178 538 1142 538"></path>
+        <text class="edge-label" x="1176" y="698">offline</text>
+
+        <path class="arrow" d="M 1036 430 C 1036 372 1036 336 1036 274"></path>
+        <text class="edge-label" x="1052" y="358">RETRY</text>
+
+        <path class="arrow" d="M 928 548 C 842 548 810 330 740 274"></path>
+
+        <path class="arrow" d="M 736 274 C 736 330 736 368 736 422"></path>
+        <text class="edge-label" x="768" y="350">cancel/error</text>
+
+        <path class="arrow" d="M 630 548 C 592 548 578 548 546 548"></path>
+
+        <path class="arrow" d="M 546 548 C 578 548 590 548 622 548"></path>
+
+        <path class="arrow power" d="M 440 274 C 440 326 440 368 440 422"></path>
+        <text class="edge-label" x="506" y="350">PWR</text>
+
+        <path class="arrow power" d="M 332 548 C 292 548 286 548 248 548"></path>
+        <text class="edge-label" x="300" y="678">sleep</text>
+
+        <path class="arrow power" d="M 142 430 C 142 368 274 318 344 274"></path>
+        <text class="edge-label" x="196" y="372">Record/Sync</text>
+
+        <path class="arrow" d="M 1334 430 C 1240 346 548 346 484 274"></path>
+      </svg>
+
+      <article class="node boot">
+        <div class="node-title"><strong>Boot</strong><span>cold boot</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint dim">-</div><div class="hint dim">-</div><div class="hint dim">-</div></div>
+          <div class="panel">
+            <div class="title" style="color: var(--boot)">BOOT</div>
+            <div class="detail">STARTING</div>
+          </div>
+          <div class="footer">92%  58GB FREE</div>
+        </div>
+        <div class="caption">Mount SD, init store, buttons, power, and status UI.</div>
+      </article>
+
+      <article class="node ready">
+        <div class="node-title"><strong>Ready</strong><span>idle</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint">PWR</div><div class="hint dim">SYNC</div><div class="hint rec">REC</div></div>
+          <div class="panel">
+            <div class="title" style="color: var(--ready)">READY</div>
+            <div class="detail">TAP REC</div>
+            <div class="sub">TAP RIGHT TO REC</div>
+          </div>
+          <div class="footer">92%  58GB FREE</div>
+        </div>
+        <div class="caption">No queued clips. Right starts capture, left blanks LCD.</div>
+      </article>
+
+      <article class="node recording">
+        <div class="node-title"><strong>Recording</strong><span>capture</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint red">CANCEL</div><div class="hint dim">-</div><div class="hint red">STOP</div></div>
+          <div class="panel">
+            <div class="title" style="color: var(--recording)">REC</div>
+            <div class="detail" style="font-size: 32px;">00:12</div>
+            <div class="sub">REC 0014</div>
+            <div class="bar"><i style="width: 14%; background: var(--recording);"></i></div>
+          </div>
+          <div class="footer">92%  58GB FREE</div>
+        </div>
+        <div class="caption">Right stops and saves. Left cancels after stop is armed.</div>
+      </article>
+
+      <article class="node saved">
+        <div class="node-title"><strong>Saved</strong><span>queued</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint">PWR</div><div class="hint sync">SYNC</div><div class="hint rec">REC</div></div>
+          <div class="panel">
+            <div class="title" style="color: var(--ready)">SAVED</div>
+            <div class="detail">1 TO SYNC</div>
+            <div class="sub">TAP SYNC TO UPLOAD</div>
+          </div>
+          <div class="footer">92%  58GB FREE</div>
+        </div>
+        <div class="caption">Clip remains local until the middle Sync button is pressed.</div>
+      </article>
+
+      <article class="node syncing">
+        <div class="node-title"><strong>Syncing</strong><span>upload</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint dim">-</div><div class="hint">BUSY</div><div class="hint dim">-</div></div>
+          <div class="panel">
+            <div class="title long" style="color: var(--syncing)">SYNCING</div>
+            <div class="detail">1/3 UPLOADED</div>
+            <div class="bar"><i style="width: 33%; background: var(--syncing);"></i></div>
+          </div>
+          <div class="footer">92%  58GB FREE</div>
+        </div>
+        <div class="caption">Wi-Fi is up only for the batch, then shut down.</div>
+      </article>
+
+      <article class="node done">
+        <div class="node-title"><strong>Done</strong><span>synced</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint">PWR</div><div class="hint dim">SYNC</div><div class="hint rec">REC</div></div>
+          <div class="panel">
+            <div class="title" style="color: var(--done)">DONE</div>
+            <div class="detail">ALL SYNCED</div>
+          </div>
+          <div class="footer">91%  58GB FREE</div>
+        </div>
+        <div class="caption">Queue is empty. The next idle redraw behaves like Ready.</div>
+      </article>
+
+      <article class="node offline">
+        <div class="node-title"><strong>Offline</strong><span>queued</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint">PWR</div><div class="hint sync">RETRY</div><div class="hint rec">REC</div></div>
+          <div class="panel">
+            <div class="title long" style="color: var(--offline)">NO WIFI</div>
+            <div class="detail">2 QUEUED</div>
+            <div class="sub" style="color: var(--offline)">SYNC POSTPONED</div>
+          </div>
+          <div class="footer">91%  58GB FREE</div>
+        </div>
+        <div class="caption">Failed sync keeps WAV files on SD for later retry.</div>
+      </article>
+
+      <article class="node error">
+        <div class="node-title"><strong>Error</strong><span>halt/return</span></div>
+        <div class="lcd">
+          <div class="hints"><div class="hint dim">-</div><div class="hint dim">-</div><div class="hint dim">-</div></div>
+          <div class="panel">
+            <div class="title" style="color: var(--error)">ERROR</div>
+            <div class="detail small">CHECK SD WIFI</div>
+            <div class="sub">SEE SERIAL LOG</div>
+          </div>
+          <div class="footer">--  --GB FREE</div>
+        </div>
+        <div class="caption">Shown for missing SD, init failure, or recording failure.</div>
+      </article>
+
+      <article class="node off">
+        <div class="node-title"><strong>Screen off</strong><span>backlight</span></div>
+        <div class="lcd screen-off">
+          <div class="off-label">BACKLIGHT OFF</div>
+        </div>
+        <div class="caption">Firmware still runs and polls buttons. Left toggles display on.</div>
+      </article>
+
+      <article class="node sleep">
+        <div class="node-title"><strong>Deep sleep</strong><span>opt-in</span></div>
+        <div class="lcd screen-off deep-sleep">
+          <div class="off-label">DEEP SLEEP</div>
+        </div>
+        <div class="caption">Wake is Record/Sync only. Left GPIO0 is deliberately excluded.</div>
+      </article>
+
+      <div class="legend">
+        <div><strong>LCD contract:</strong> hint row, card text, accent colors, progress bars, and footer mirror the firmware ST7789 renderer.</div>
+        <div><strong>Queue rule:</strong> recordings are saved locally first. Sync uploads queued clips oldest first and moves success to <code>/sdcard/sent</code>.</div>
+        <div><strong>Power rule:</strong> screen-off is only the LCD backlight. Deep sleep is opt-in and wakes on Record/Sync, not GPIO0/Left.</div>
+      </div>
+    </section>
+
+    <div class="source">Source: firmware/main/status.c, firmware/main/app_main.c</div>
+  </main>
+</body>
+</html>

@@ -116,8 +116,9 @@ Record this evidence for the first public alpha:
   device misses the response, a later retry can create a duplicate recording.
   The first hardware retry tests should watch for this before public demos.
 - Keep SDMMC in 1-bit mode until basic recording and upload pass.
-- Stereo upload is correct but doubles file size versus mono. Down-mix only
-  after confirming whether two-channel capture helps real meeting audio.
+- Device upload is mono to keep Railway HTTPS sync under proxy timeouts and cut
+  transcription cost. The firmware still captures the board-native stereo mic
+  stream and averages left/right samples before writing/uploading.
 
 ## Public-alpha release gate
 

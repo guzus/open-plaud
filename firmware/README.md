@@ -20,8 +20,8 @@ along the top edge, plus battery and microSD usage. See the signed-off UX in
 > record → upload → cloud loop works, and the 3-button UX (toggle record,
 > deferred sync, on-screen labels, battery + storage) was flashed and checked on
 > hardware. Button mapping is confirmed (leftmost=GPIO0=power, middle=GPIO5=sync,
-> rightmost=GPIO4=record). Remaining: the **battery divider** needs calibration —
-> see "Validate on first hardware bring-up".
+> rightmost=GPIO4=record). Battery hold/readout and Railway HTTPS sync are
+> validated; sync shows active file progress and skips empty corrupt clips.
 
 ## Prerequisites
 
@@ -56,6 +56,13 @@ idf.py -B build-rev-a -DSDKCONFIG=build-rev-a/sdkconfig \
   -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.rev_a.defaults" build
 ```
 
+To build the CoreBluetooth companion firmware profile:
+
+```bash
+idf.py -B build-ble -DSDKCONFIG=build-ble/sdkconfig \
+  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ble.defaults" build
+```
+
 `idf.py` pulls managed components on first build. If the port doesn't appear,
 hold **BOOT**, tap **RESET**, release BOOT to force download mode.
 
@@ -68,9 +75,11 @@ boot), a `button map: LEFT=GPIO0 … MIDDLE=GPIO5 … RIGHT=GPIO4 …` line, the
   reused — the root *and* `/sdcard/sent/` are scanned); **tap Right again** to
   stop. Stop saves and **queues** the clip — it is not uploaded here.
 - **Tap Middle (Sync)** to upload the queue to `POST {server}/v1/recordings`,
-  oldest first. Each success moves to `/sdcard/sent/`; on failure the clip stays
-  in the SD root and Sync re-enters Wi-Fi setup on the next press (the next boot
-  also retries).
+  oldest first. The screen shows active-file percent while a clip is uploading.
+  Each success moves to `/sdcard/sent/`; on failure the clip stays in the SD root
+  and Sync re-enters Wi-Fi setup on the next press (the next boot also retries).
+  Empty/header-only corrupt WAVs are discarded so one bad clip cannot block the
+  queue.
 - **Left** toggles the screen when idle, and **cancels** (discards) the current
   clip while recording.
 
@@ -82,10 +91,11 @@ after each batch, the screen blanks while recording (`OPEN_PLAUD_REC_SCREEN_S`,
 default 10 s). **Deep sleep** is implemented (`OPEN_PLAUD_IDLE_SLEEP_S`) but ships
 **OFF by default**: on this board it powers down the USB-Serial/JTAG and a wake
 doesn't restore it, and there's no reset button — so enabling it can strand the
-device un-reflashable + un-USB-recognizable until a battery power-cycle. Battery %
-uses a calibrated 3:1 divider (`power.c`); the **Left** button blanks the screen on
-demand. See [`docs/POWER.md`](../docs/POWER.md) for estimated battery life
-(~3–8 h active) and the deep-sleep caveat.
+device un-reflashable + un-USB-recognizable until a battery power-cycle. On
+battery, GPIO2 / `BAT_EN` is held high so the board stays alive after the physical
+PWR button is released. Battery % uses a calibrated 3:1 divider (`power.c`); the
+**Left** button blanks the screen on demand. See [`docs/POWER.md`](../docs/POWER.md)
+for estimated battery life (~3–8 h active) and the deep-sleep caveat.
 When the screen is off on battery, Middle/Sync is ignored instead of turning the
 screen on; while charging, it may wake the screen and sync.
 
@@ -99,8 +109,10 @@ screen on; while charging, it may wake the screen and sync.
 | `main/power.c` | battery percentage + charge status (ADC1 on GPIO1; divider ratio is a calibratable constant) |
 | `main/sdcard.c` | mount microSD (FATFS over configurable 1-bit/4-bit SDMMC) + `sdcard_usage()` for the UI |
 | `main/wav.c` | streaming 16-bit PCM WAV writer |
-| `main/rec_store.c` | clip numbering (`rec_NNNN.wav`, never reused), `/sdcard/sent/` move, boot-time retry queue |
-| `main/net_upload.c` | Wi-Fi STA + multipart upload to the server |
+| `main/rec_store.c` | clip numbering (`rec_NNNN.wav`, never reused), `/sdcard/sent/` move, boot-time retry queue, empty-clip discard |
+| `main/net_upload.c` | Wi-Fi STA + multipart upload; runtime BLE/NVS credentials override menuconfig; legacy stereo WAVs stream as mono |
+| `main/ble_companion.c` | optional CoreBluetooth companion GATT service for setup, status, sync commands, and chunked clip transfer |
+| `main/ble_audio.c` | IMA ADPCM block encoder for compact BLE clip chunks |
 | `main/status.c` | Device UI: ST7789 LCD (per-button labels, state, battery + microSD usage; partial redraws keep capture unstalled) on Waveshare, RGB LED states on Rev A |
 | `main/app_main.c` | orchestration: mount → boot retry → 3-button loop (toggle record, deferred sync, screen toggle) |
 | `sdkconfig.defaults` | 16 MB flash, octal PSRAM, USB-JTAG console, custom partitions |
@@ -114,10 +126,19 @@ upload raw audio. The server does transcription/summarization.
 ```
 POST {OP_SERVER}/v1/recordings
 Content-Type: multipart/form-data
-  file=@rec_0001.wav            # 16 kHz, 16-bit, 2-channel PCM WAV
+  file=@rec_0001.wav            # 16 kHz, 16-bit, mono PCM WAV
 → 200 { "id": "...", "status": "received", "filename": "rec_0001.wav", "size_bytes": ... }
        # the server transcribes/summarizes in the background; poll GET for the result
 ```
+
+New recordings are stored as mono WAVs. Older stereo WAVs already queued on the
+SD card are downmixed in the upload stream without rewriting the original file,
+then moved to `/sdcard/sent/` after a 2xx response.
+
+Optional Wi-Fi compression (`OPEN_PLAUD_COMPRESS_TRANSFERS`) sends
+`application/vnd.openplaud.adpcm` in an Open Plaud ADPCM container. Enable it
+only after the target server has the ADPCM decoder deployed. BLE chunk transfer
+uses the same IMA ADPCM compression family for compact iPhone pulls.
 
 Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 
@@ -130,6 +151,8 @@ Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 - `OPEN_PLAUD_MAX_REC_SECONDS` (auto-stop for a held button, default 1800)
 - `OPEN_PLAUD_AUDIO_READ_TIMEOUT_MS`
 - `OPEN_PLAUD_AUDIO_READ_MAX_ERRORS`
+- `OPEN_PLAUD_BLE_COMPANION` (requires ESP-IDF Bluetooth/NimBLE enabled)
+- `OPEN_PLAUD_COMPRESS_TRANSFERS` (requires a server that supports Open Plaud ADPCM ingest)
 - `OPEN_PLAUD_SDMMC_WIDTH` (1-bit default; 4-bit only after hardware validation)
 
 ## Validate on first hardware bring-up
@@ -154,11 +177,10 @@ items to confirm with a board in hand:
   Left mid-recording → clip discarded (no `rec_NNNN.wav` left behind). Confirm
   the on-screen `MM:SS` ticks and audio has no periodic dropouts (the timer is a
   partial redraw specifically to avoid stalling I2S capture).
-- **Battery reading (`power.c`).** The divider ratio (`BAT_DIVIDER`, default 2.0),
-  EN polarity, and charge-stat polarity are UNVERIFIED. With `CONFIG_LOG_DEFAULT_LEVEL`
-  at debug you'll see `battery raw=… adc=…mV vbat=…mV`; compare `vbat` to a meter
-  and adjust `BAT_DIVIDER`/`BAT_FULL_MV`/`BAT_EMPTY_MV`. An implausible reading
-  shows `BAT --` rather than a wrong percentage.
+- **Battery reading (`power.c`).** The divider ratio is calibrated to 3:1 on the
+  Waveshare battery SKU. If the pack changes, compare `vbat` to a meter and
+  adjust `BAT_DIVIDER`/`BAT_FULL_MV`/`BAT_EMPTY_MV`. An implausible reading shows
+  `BAT --` rather than a wrong percentage.
 - **FATFS rename-into-subdir.** `rec_store_mark_sent()` relies on
   `rename("/sdcard/rec_NNNN.wav" → "/sdcard/sent/…")` across directories on the
   same volume (FatFs `f_rename` supports this). Confirm clips actually land in
@@ -170,19 +192,16 @@ items to confirm with a board in hand:
   a wedged DMA must surface, or the task blocks forever, invisible to the task
   watchdog); a clip aborts after 20 consecutive empty reads (~10 s worst case).
   Both numbers are untested — tune once you see real I2S failure behavior.
-- **Transcription cost:** capture is 2-channel; consider down-mixing the two mics
-  to mono before upload (halves file size and cloud-Whisper cost) unless
-  diarization needs both. Not a correctness issue: server-side `whisper_cpp` was
-  verified to transcribe device-shaped stereo 16 kHz WAVs as-is.
+- **Transcription cost:** device WAVs are mono. The capture backend still reads
+  the board-native stereo mic stream and averages left/right samples before
+  writing/uploading.
 - **Custom Rev A PDM path.** The proposed pin map compiles with ESP-IDF PDM RX
   and RGB status output, but the schematic, mic select wiring, acoustic ports,
   and LED polarity still need board-level validation.
 
 A corrupt-clip guard is already in place: `app_main.c` aborts on a failed SD
-write and refuses to upload if the WAV header can't be patched on close. Caveat:
-a close-failed clip stays in the card root, and the next boot's retry pass
-cannot tell it from a healthy pending clip, so it will be attempted then —
-inspect/remove such clips before rebooting if that matters.
+write and refuses to keep clips with no captured audio; `rec_store.c` also
+discards empty/header-only WAVs during retry so they do not block later clips.
 
 ## TODO (ROADMAP v1)
 
