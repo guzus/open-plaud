@@ -11,12 +11,22 @@ esp_err_t rec_store_next_path(char *out, size_t out_len);  /* next free rec_NNNN
 esp_err_t rec_store_mark_sent(const char *path);           /* move a clip into /sent   */
 int       rec_store_pending_count(void);                   /* rec_*.wav awaiting upload */
 
+typedef enum {
+    REC_STORE_PROGRESS_WIFI_CONNECTING,
+    REC_STORE_PROGRESS_WIFI_CONNECTED,
+    REC_STORE_PROGRESS_WIFI_FAILED,
+    REC_STORE_PROGRESS_UPLOADING,
+    REC_STORE_PROGRESS_CLIP_DONE,
+} rec_store_progress_phase_t;
+
 /* Fired during upload with (completed clips, total clips, active file percent,
  * active clip path). `current_pct` is 0..100 while a clip is in flight and -1
  * after a whole-clip success. May be NULL. Runs on the caller's task — safe for a
  * UI redraw during Sync, since no audio capture is in flight then. */
 typedef void (*rec_store_progress_fn)(int uploaded, int total, int current_pct,
-                                      const char *clip, void *ctx);
+                                      const char *clip,
+                                      rec_store_progress_phase_t phase,
+                                      void *ctx);
 
 /* Upload pending clips oldest-first, moving each success into /sent. Stops on
  * the first upload failure (Wi-Fi is likely down — don't burn the boot on N

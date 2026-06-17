@@ -352,7 +352,8 @@ static void do_record(void)
 /* Redraw the SYNCING screen after each clip uploads. Safe to redraw fully here:
  * sync runs on the main loop, not the capture task, so no audio is in flight. */
 static void sync_progress(int uploaded, int total, int current_pct,
-                          const char *clip, void *ctx)
+                          const char *clip, rec_store_progress_phase_t phase,
+                          void *ctx)
 {
     (void)ctx;
     char label[16];
@@ -363,13 +364,28 @@ static void sync_progress(int uploaded, int total, int current_pct,
         clip_label(base, label, sizeof label);
         screen_clip = label;
     }
+    open_plaud_wifi_status_t wifi = OPEN_PLAUD_WIFI_HIDDEN;
+    switch (phase) {
+    case REC_STORE_PROGRESS_WIFI_CONNECTING:
+        wifi = OPEN_PLAUD_WIFI_CONNECTING;
+        break;
+    case REC_STORE_PROGRESS_WIFI_CONNECTED:
+    case REC_STORE_PROGRESS_UPLOADING:
+    case REC_STORE_PROGRESS_CLIP_DONE:
+        wifi = OPEN_PLAUD_WIFI_CONNECTED;
+        break;
+    case REC_STORE_PROGRESS_WIFI_FAILED:
+        wifi = OPEN_PLAUD_WIFI_FAILED;
+        break;
+    }
     const status_info_t info = {
         .pending = total - uploaded, .elapsed_s = -1,
         .sync_done = uploaded, .sync_total = total,
-        .upload_pct = current_pct, .clip = screen_clip,
+        .upload_pct = current_pct, .clip = screen_clip, .wifi = wifi,
     };
     status_update(OPEN_PLAUD_STATUS_SYNCING, &info);
-    publish_ble_status(uploaded, total, current_pct, false, true);
+    publish_ble_status(uploaded, total, current_pct, phase == REC_STORE_PROGRESS_WIFI_FAILED,
+                       wifi == OPEN_PLAUD_WIFI_CONNECTED);
 }
 
 /* Middle button: upload the queue oldest-first. Blocks (Wi-Fi + uploads), which
@@ -387,7 +403,8 @@ static void do_sync(int pending)
 
     const status_info_t syncing = {
         .pending = pending, .elapsed_s = -1,
-        .sync_done = 0, .sync_total = pending, .upload_pct = 0, .clip = NULL,
+        .sync_done = 0, .sync_total = pending, .upload_pct = -1, .clip = NULL,
+        .wifi = OPEN_PLAUD_WIFI_CONNECTING,
     };
     status_update(OPEN_PLAUD_STATUS_SYNCING, &syncing);
     publish_ble_status(0, pending, 0, false, false);

@@ -36,10 +36,30 @@ typedef struct {
     int last_pct;
 } upload_progress_ctx_t;
 
-static void upload_progress(const char *path, int sent_bytes, int total_bytes, void *ctx)
+static void upload_progress(const char *path, int sent_bytes, int total_bytes,
+                            net_upload_phase_t phase, void *ctx)
 {
     upload_progress_ctx_t *p = (upload_progress_ctx_t *)ctx;
-    if (!p || !p->progress || total_bytes <= 0) {
+    if (!p || !p->progress) {
+        return;
+    }
+    switch (phase) {
+    case NET_UPLOAD_PHASE_WIFI_CONNECTING:
+        p->progress(p->uploaded, p->total, -1, path,
+                    REC_STORE_PROGRESS_WIFI_CONNECTING, p->ctx);
+        return;
+    case NET_UPLOAD_PHASE_WIFI_CONNECTED:
+        p->progress(p->uploaded, p->total, -1, path,
+                    REC_STORE_PROGRESS_WIFI_CONNECTED, p->ctx);
+        return;
+    case NET_UPLOAD_PHASE_WIFI_FAILED:
+        p->progress(p->uploaded, p->total, -1, path,
+                    REC_STORE_PROGRESS_WIFI_FAILED, p->ctx);
+        return;
+    case NET_UPLOAD_PHASE_UPLOADING:
+        break;
+    }
+    if (total_bytes <= 0) {
         return;
     }
     int pct = sent_bytes * 100 / total_bytes;
@@ -49,7 +69,8 @@ static void upload_progress(const char *path, int sent_bytes, int total_bytes, v
         return;
     }
     p->last_pct = pct;
-    p->progress(p->uploaded, p->total, pct, path, p->ctx);
+    p->progress(p->uploaded, p->total, pct, path,
+                REC_STORE_PROGRESS_UPLOADING, p->ctx);
 }
 
 /* Match "rec_NNNN.wav" case-insensitively: FATFS is a case-insensitive
@@ -202,7 +223,8 @@ int rec_store_retry_pending(bool *out_upload_failed,
             }
             uploaded++;
             if (progress) {
-                progress(uploaded, (int)count, -1, NULL, ctx);
+                progress(uploaded, (int)count, -1, NULL,
+                         REC_STORE_PROGRESS_CLIP_DONE, ctx);
             }
             continue;
         }
@@ -214,9 +236,6 @@ int rec_store_retry_pending(bool *out_upload_failed,
             .total = (int)count,
             .last_pct = -5,
         };
-        if (progress) {
-            progress(uploaded, (int)count, 0, path, ctx);
-        }
         if (net_upload_wav(path, upload_progress, &progress_ctx) != ESP_OK) {
             ESP_LOGW(TAG, "retry stopped at %s — %u clip(s) stay queued",
                      path, (unsigned)(count - i));
@@ -229,7 +248,8 @@ int rec_store_retry_pending(bool *out_upload_failed,
         }
         uploaded++;
         if (progress) {
-            progress(uploaded, (int)count, -1, NULL, ctx);
+            progress(uploaded, (int)count, -1, NULL,
+                     REC_STORE_PROGRESS_CLIP_DONE, ctx);
         }
     }
     return uploaded;

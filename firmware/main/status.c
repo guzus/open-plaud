@@ -26,7 +26,7 @@ static const char *TAG = "status";
 
 /* Shared across LCD + RGB builds so the public API has one source of truth. */
 static open_plaud_status_t s_status = OPEN_PLAUD_STATUS_BOOT;
-static status_info_t s_info = { -1, -1, -1, -1, -1, NULL };
+static status_info_t s_info = { -1, -1, -1, -1, -1, NULL, OPEN_PLAUD_WIFI_HIDDEN };
 static char s_clip[20];   /* owns the clip name; callers' pointers may dangle */
 
 #if BSP_HAS_LCD
@@ -426,7 +426,37 @@ static void lcd_draw_full(open_plaud_status_t status, const status_info_t *info)
         lcd_draw_text_centered(UI_TITLE_Y, "REC", 5, accent, UI_COLOR_CARD);
         draw_timer(info ? info->elapsed_s : 0);
         if (info && info->clip) {
-            lcd_draw_text_centered(UI_SUB_Y, info->clip, 2, UI_COLOR_MUTED, UI_COLOR_CARD);
+            char sub[40];
+            const char *wifi = NULL;
+            const char *wifi_short = NULL;
+            switch (info->wifi) {
+            case OPEN_PLAUD_WIFI_CONNECTING: wifi = "WIFI CONNECTING"; wifi_short = "WIFI"; break;
+            case OPEN_PLAUD_WIFI_CONNECTED: wifi = "WIFI OK"; wifi_short = "WIFI"; break;
+            case OPEN_PLAUD_WIFI_FAILED: wifi = "WIFI FAILED"; wifi_short = "NO WIFI"; break;
+            case OPEN_PLAUD_WIFI_HIDDEN: break;
+            }
+            if (wifi && info->clip) {
+                snprintf(sub, sizeof sub, "%s %s", wifi_short, info->clip);
+                lcd_draw_text_centered(UI_SUB_Y, sub, 2, UI_COLOR_MUTED, UI_COLOR_CARD);
+            } else if (wifi) {
+                lcd_draw_text_centered(UI_SUB_Y, wifi, 2, UI_COLOR_MUTED, UI_COLOR_CARD);
+            } else if (info->clip) {
+                lcd_draw_text_centered(UI_SUB_Y, info->clip, 2, UI_COLOR_MUTED, UI_COLOR_CARD);
+            }
+        } else if (info) {
+            switch (info->wifi) {
+            case OPEN_PLAUD_WIFI_CONNECTING:
+                lcd_draw_text_centered(UI_SUB_Y, "WIFI CONNECTING", 2, UI_COLOR_MUTED, UI_COLOR_CARD);
+                break;
+            case OPEN_PLAUD_WIFI_CONNECTED:
+                lcd_draw_text_centered(UI_SUB_Y, "WIFI OK", 2, UI_COLOR_MUTED, UI_COLOR_CARD);
+                break;
+            case OPEN_PLAUD_WIFI_FAILED:
+                lcd_draw_text_centered(UI_SUB_Y, "WIFI FAILED", 2, UI_COLOR_OFFLINE, UI_COLOR_CARD);
+                break;
+            case OPEN_PLAUD_WIFI_HIDDEN:
+                break;
+            }
         }
         break;
     case OPEN_PLAUD_STATUS_SAVED:
@@ -626,7 +656,7 @@ void status_update(open_plaud_status_t status, const status_info_t *info)
             s_info.clip = NULL;
         }
     } else {
-        s_info = (status_info_t){ -1, -1, -1, -1, -1, NULL };
+        s_info = (status_info_t){ -1, -1, -1, -1, -1, NULL, OPEN_PLAUD_WIFI_HIDDEN };
     }
     ESP_LOGI(TAG, "status: %s", status_name(status));
 #if BSP_HAS_LCD

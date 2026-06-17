@@ -14,6 +14,13 @@ typedef enum {
     OPEN_PLAUD_STATUS_ERROR,
 } open_plaud_status_t;
 
+typedef enum {
+    OPEN_PLAUD_WIFI_HIDDEN,
+    OPEN_PLAUD_WIFI_CONNECTING,
+    OPEN_PLAUD_WIFI_CONNECTED,
+    OPEN_PLAUD_WIFI_FAILED,
+} open_plaud_wifi_status_t;
+
 /* Dynamic figures drawn alongside a state. A negative int / NULL pointer means
  * "hide this field". Battery and storage are read by status.c itself, so they
  * are not passed in here. */
@@ -24,6 +31,7 @@ typedef struct {
     int sync_total;   /* clips this sync started with                    */
     int upload_pct;   /* active clip upload percent (SYNCING), or -1     */
     const char *clip; /* active clip basename, e.g. "REC_0007"           */
+    open_plaud_wifi_status_t wifi; /* Wi-Fi phase during SYNCING          */
 } status_info_t;
 
 esp_err_t status_init(void);

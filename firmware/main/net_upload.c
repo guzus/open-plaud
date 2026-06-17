@@ -485,7 +485,8 @@ static esp_err_t upload_file_passthrough(esp_http_client_handle_t client, FILE *
             }
             sent += (long)n;
             if (progress && total_bytes <= INT_MAX) {
-                progress(path, (int)sent, (int)total_bytes, ctx);
+                progress(path, (int)sent, (int)total_bytes,
+                         NET_UPLOAD_PHASE_UPLOADING, ctx);
             }
             int pct = total_bytes > 0 ? (int)(sent * 100 / total_bytes) : 100;
             if (pct >= 100 || pct - last_logged_pct >= 10) {
@@ -521,7 +522,8 @@ static esp_err_t upload_file_downmix_mono(esp_http_client_handle_t client, FILE 
     uint32_t sent = WAV_HEADER_BYTES;
     int last_logged_pct = -5;
     if (progress && plan->upload_bytes <= INT_MAX) {
-        progress(path, (int)sent, (int)plan->upload_bytes, ctx);
+        progress(path, (int)sent, (int)plan->upload_bytes,
+                 NET_UPLOAD_PHASE_UPLOADING, ctx);
     }
 
     while (source_remaining > 0) {
@@ -556,7 +558,8 @@ static esp_err_t upload_file_downmix_mono(esp_http_client_handle_t client, FILE 
         source_remaining -= (uint32_t)n;
         sent += (uint32_t)mono_bytes;
         if (progress && plan->upload_bytes <= INT_MAX) {
-            progress(path, (int)sent, (int)plan->upload_bytes, ctx);
+            progress(path, (int)sent, (int)plan->upload_bytes,
+                     NET_UPLOAD_PHASE_UPLOADING, ctx);
         }
         int pct = plan->upload_bytes > 0 ? (int)((uint64_t)sent * 100 / plan->upload_bytes) : 100;
         if (pct >= 100 || pct - last_logged_pct >= 10) {
@@ -606,7 +609,8 @@ static esp_err_t upload_file_adpcm(esp_http_client_handle_t client, FILE *file,
     uint8_t pending_byte = 0;
 
     if (progress && plan->upload_bytes <= INT_MAX) {
-        progress(path, (int)sent, (int)plan->upload_bytes, ctx);
+        progress(path, (int)sent, (int)plan->upload_bytes,
+                 NET_UPLOAD_PHASE_UPLOADING, ctx);
     }
 
     while (source_remaining > 0) {
@@ -658,7 +662,8 @@ static esp_err_t upload_file_adpcm(esp_http_client_handle_t client, FILE *file,
 
         source_remaining -= (uint32_t)n;
         if (progress && plan->upload_bytes <= INT_MAX) {
-            progress(path, (int)sent, (int)plan->upload_bytes, ctx);
+            progress(path, (int)sent, (int)plan->upload_bytes,
+                     NET_UPLOAD_PHASE_UPLOADING, ctx);
         }
         int pct = plan->upload_bytes > 0 ? (int)((uint64_t)sent * 100 / plan->upload_bytes) : 100;
         if (pct >= 100 || pct - last_logged_pct >= 10) {
@@ -677,7 +682,8 @@ static esp_err_t upload_file_adpcm(esp_http_client_handle_t client, FILE *file,
     }
 
     if (progress && plan->upload_bytes <= INT_MAX) {
-        progress(path, (int)sent, (int)plan->upload_bytes, ctx);
+        progress(path, (int)sent, (int)plan->upload_bytes,
+                 NET_UPLOAD_PHASE_UPLOADING, ctx);
     }
     ESP_LOGI(TAG, "upload progress %s: 100%% (%u/%u compressed bytes)",
              filename, (unsigned)sent, (unsigned)plan->upload_bytes);
@@ -687,7 +693,19 @@ static esp_err_t upload_file_adpcm(esp_http_client_handle_t client, FILE *file,
 esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void *ctx)
 {
     ESP_RETURN_ON_FALSE(path, ESP_ERR_INVALID_ARG, TAG, "path is NULL");
-    ESP_RETURN_ON_ERROR(wifi_connect(), TAG, "wifi_connect");
+    if (progress) {
+        progress(path, 0, 0, NET_UPLOAD_PHASE_WIFI_CONNECTING, ctx);
+    }
+    esp_err_t err = wifi_connect();
+    if (err != ESP_OK) {
+        if (progress) {
+            progress(path, 0, 0, NET_UPLOAD_PHASE_WIFI_FAILED, ctx);
+        }
+        ESP_RETURN_ON_ERROR(err, TAG, "wifi_connect");
+    }
+    if (progress) {
+        progress(path, 0, 0, NET_UPLOAD_PHASE_WIFI_CONNECTED, ctx);
+    }
 
     FILE *file = fopen(path, "rb");
     ESP_RETURN_ON_FALSE(file, ESP_ERR_NOT_FOUND, TAG, "cannot open %s", path);
@@ -709,7 +727,7 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
     }
 
     char url[256];
-    esp_err_t err = build_upload_url(url, sizeof(url));
+    err = build_upload_url(url, sizeof(url));
     if (err != ESP_OK) {
         fclose(file);
         ESP_LOGE(TAG, "server URL is too long");
@@ -785,7 +803,7 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
         ESP_LOGI(TAG, "downmixing %s from stereo 16-bit PCM to mono for upload", filename);
     }
     if (progress && plan.upload_bytes > 0 && plan.upload_bytes <= INT_MAX) {
-        progress(path, 0, (int)plan.upload_bytes, ctx);
+        progress(path, 0, (int)plan.upload_bytes, NET_UPLOAD_PHASE_UPLOADING, ctx);
     }
     err = esp_http_client_open(client, content_len);
     if (err == ESP_OK) {
