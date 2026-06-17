@@ -537,6 +537,58 @@ static esp_err_t encode_file_ogg_opus(FILE *file, const upload_plan_t *plan,
     return err;
 }
 
+esp_err_t net_upload_prepare_opus_sidecar(const char *path)
+{
+#if CONFIG_OPEN_PLAUD_COMPRESS_TRANSFERS && CONFIG_OPEN_PLAUD_OPUS_TRANSFERS
+    ESP_RETURN_ON_FALSE(path, ESP_ERR_INVALID_ARG, TAG, "path is NULL");
+
+    FILE *file = fopen(path, "rb");
+    ESP_RETURN_ON_FALSE(file, ESP_ERR_NOT_FOUND, TAG, "cannot open %s", path);
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return ESP_FAIL;
+    }
+    long file_size = ftell(file);
+    if (file_size < 0 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return ESP_FAIL;
+    }
+
+    upload_plan_t plan = make_upload_plan(file, file_size);
+    if (!plan.compress_opus) {
+        fclose(file);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    char tmp_path[96] = { 0 };
+    char sidecar_path[96] = { 0 };
+    if (opus_ogg_path_for_wav(path, sidecar_path, sizeof(sidecar_path)) != ESP_OK) {
+        fclose(file);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    remove(sidecar_path);
+    long opus_size = 0;
+    esp_err_t err = encode_file_ogg_opus(file, &plan, path, tmp_path,
+                                         sizeof(tmp_path), &opus_size);
+    fclose(file);
+    if (err != ESP_OK || opus_size <= 0) {
+        remove(tmp_path);
+        return err == ESP_OK ? ESP_FAIL : err;
+    }
+    if (rename(tmp_path, sidecar_path) != 0) {
+        ESP_LOGW(TAG, "rename(%s -> %s) failed", tmp_path, sidecar_path);
+        remove(tmp_path);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "prepared Opus sidecar %s (%ld bytes)", sidecar_path, opus_size);
+    return ESP_OK;
+#else
+    (void)path;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
 static esp_err_t upload_file_passthrough(esp_http_client_handle_t client, FILE *file,
                                          const char *filename, const char *path,
                                          uint32_t total_bytes,

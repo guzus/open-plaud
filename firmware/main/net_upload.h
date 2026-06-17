@@ -19,6 +19,10 @@ typedef void (*net_upload_progress_fn)(const char *path, int sent_bytes,
 esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress,
                          void *ctx);
 
+/* Prepare a local rec_NNNN.opus sidecar next to a saved WAV. This does not
+ * connect to Wi-Fi; sync later uploads the sidecar directly when present. */
+esp_err_t net_upload_prepare_opus_sidecar(const char *path);
+
 /* Stop the Wi-Fi station after an upload batch to cut idle draw. The driver
  * stays initialized so the next upload reconnects without rebuilding the stack. */
 void net_upload_shutdown(void);
