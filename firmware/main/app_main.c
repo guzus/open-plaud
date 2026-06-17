@@ -22,6 +22,7 @@
  * board.h; this file logs the GPIO behind each label at boot.
  */
 #include <stdbool.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +37,7 @@
 #include "board.h"
 #include "button.h"
 #include "net_upload.h"
+#include "opus_ogg.h"
 #include "power.h"
 #include "rec_store.h"
 #include "sdcard.h"
@@ -212,6 +214,30 @@ static record_result_t record_clip(const char *path)
     int rec_screen_idle = 0;            /* button-free polls (for screen blank) */
     record_result_t result = REC_SAVED;
 
+#if CONFIG_OPEN_PLAUD_RECORD_OPUS_SIDECAR
+    static opus_ogg_writer_t opus;
+    char opus_path[48] = { 0 };
+    char opus_tmp_path[52] = { 0 };
+    bool opus_active = false;
+    bool opus_ready = false;
+    if (opus_ogg_path_for_wav(path, opus_path, sizeof(opus_path)) == ESP_OK &&
+        opus_ogg_temp_path_for_wav(path, opus_tmp_path, sizeof(opus_tmp_path)) == ESP_OK) {
+        remove(opus_path);
+        remove(opus_tmp_path);
+        esp_err_t opus_err = opus_ogg_open(&opus, opus_tmp_path, AUDIO_SAMPLE_RATE,
+                                           CONFIG_OPEN_PLAUD_OPUS_BITRATE);
+        if (opus_err == ESP_OK) {
+            opus_active = true;
+            ESP_LOGI(TAG, "recording Opus sidecar %s", opus_tmp_path);
+        } else {
+            ESP_LOGW(TAG, "Opus sidecar disabled for this clip: %s",
+                     esp_err_to_name(opus_err));
+        }
+    } else {
+        ESP_LOGW(TAG, "Opus sidecar path too long for %s", path);
+    }
+#endif
+
     ESP_LOGI(TAG, "recording %s (tap Right to stop, Left to cancel)", path);
     while (written < max_bytes) {
         /* Poll buttons every iteration, BEFORE the audio read, so stop/cancel is
@@ -291,6 +317,18 @@ static record_result_t record_clip(const char *path)
         }
         written += write_bytes;
 
+#if CONFIG_OPEN_PLAUD_RECORD_OPUS_SIDECAR
+        if (opus_active) {
+            esp_err_t opus_err = opus_ogg_write_pcm(&opus, mono, frames);
+            if (opus_err != ESP_OK) {
+                ESP_LOGW(TAG, "Opus sidecar write failed; keeping WAV only: %s",
+                         esp_err_to_name(opus_err));
+                opus_ogg_abort(&opus, opus_tmp_path);
+                opus_active = false;
+            }
+        }
+#endif
+
         const int elapsed = (int)(written / WAV_BYTES_PER_SEC);
         if (elapsed != elapsed_shown) {
             elapsed_shown = elapsed;
@@ -302,19 +340,57 @@ static record_result_t record_clip(const char *path)
                  CONFIG_OPEN_PLAUD_MAX_REC_SECONDS);
     }
 
+#if CONFIG_OPEN_PLAUD_RECORD_OPUS_SIDECAR
+    if (opus_active) {
+        long opus_size = 0;
+        if (result == REC_CANCELLED || written == 0) {
+            opus_ogg_abort(&opus, opus_tmp_path);
+        } else {
+            esp_err_t opus_err = opus_ogg_close(&opus, &opus_size);
+            if (opus_err == ESP_OK && opus_size > 0) {
+                opus_ready = true;
+            } else {
+                ESP_LOGW(TAG, "Opus sidecar close failed; keeping WAV only: %s",
+                         esp_err_to_name(opus_err));
+                remove(opus_tmp_path);
+            }
+        }
+    }
+#endif
+
     const bool close_ok = (wav_close(&wav) == ESP_OK);
     audio_deinit();
 
     if (result == REC_CANCELLED || written == 0) {
         remove(path);
+#if CONFIG_OPEN_PLAUD_RECORD_OPUS_SIDECAR
+        remove(opus_tmp_path);
+        remove(opus_path);
+#endif
         ESP_LOGI(TAG, "%s removed (%s)", path,
                  result == REC_CANCELLED ? "cancelled" : "no audio captured");
         return result == REC_CANCELLED ? REC_CANCELLED : REC_FAILED;
     }
     if (!close_ok) {
+#if CONFIG_OPEN_PLAUD_RECORD_OPUS_SIDECAR
+        remove(opus_tmp_path);
+        remove(opus_path);
+#endif
         ESP_LOGE(TAG, "wav close failed - not keeping corrupt clip; %s left on SD", path);
         return REC_FAILED;
     }
+#if CONFIG_OPEN_PLAUD_RECORD_OPUS_SIDECAR
+    if (opus_ready) {
+        remove(opus_path);
+        if (rename(opus_tmp_path, opus_path) == 0) {
+            ESP_LOGI(TAG, "saved Opus sidecar %s", opus_path);
+        } else {
+            ESP_LOGW(TAG, "rename(%s -> %s) failed: errno=%d",
+                     opus_tmp_path, opus_path, errno);
+            remove(opus_tmp_path);
+        }
+    }
+#endif
     ESP_LOGI(TAG, "saved %u bytes to %s (queued for sync)", (unsigned)written, path);
     return REC_SAVED;
 }

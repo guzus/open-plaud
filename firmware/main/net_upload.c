@@ -4,18 +4,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_random.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "nvs.h"
-#include "opus.h"
+#include "opus_ogg.h"
 
 static const char *TAG = "net_upload";
 
@@ -25,12 +25,6 @@ static const char *TAG = "net_upload";
 #define WAV_HEADER_BYTES   44
 #define OPAD_HEADER_BYTES  22
 #define OPAD_MEDIA_TYPE    "application/vnd.openplaud.adpcm"
-#define OGG_OPUS_MEDIA_TYPE "audio/ogg"
-#define OPUS_FRAME_MS      20
-#define OPUS_MAX_PACKET_BYTES 1500
-#define OGG_PACKETS_PER_PAGE 10
-#define OGG_MAX_SEGMENTS   255
-#define OGG_PAGE_PAYLOAD_BYTES (OPUS_MAX_PACKET_BYTES * OGG_PACKETS_PER_PAGE)
 #define CFG_NS             "op_ble_cfg"
 #define KEY_SSID           "ssid"
 #define KEY_WIFI_PW        "wifi_pw"
@@ -50,7 +44,7 @@ static int s_retry_count;
 static uint8_t s_upload_chunk[UPLOAD_CHUNK_BYTES];
 static uint8_t s_mono_chunk[UPLOAD_CHUNK_BYTES / 2];
 static int16_t s_opus_pcm[960]; /* 20 ms at the largest supported Opus rate, 48 kHz. */
-static uint8_t s_opus_packet[OPUS_MAX_PACKET_BYTES];
+static opus_ogg_writer_t s_upload_opus_writer;
 
 typedef struct {
     bool downmix_stereo16_to_mono;
@@ -63,19 +57,6 @@ typedef struct {
     uint32_t sample_count;
     uint16_t source_channels;
 } upload_plan_t;
-
-typedef struct {
-    FILE *file;
-    uint32_t serial;
-    uint32_t sequence;
-    uint8_t segments[OGG_MAX_SEGMENTS];
-    uint8_t payload[OGG_PAGE_PAYLOAD_BYTES];
-    int segment_count;
-    size_t payload_len;
-    uint64_t granule_pos;
-} ogg_writer_t;
-
-static ogg_writer_t s_ogg_writer;
 
 static void load_runtime_string(const char *key, const char *fallback,
                                 char *out, size_t out_len)
@@ -339,154 +320,6 @@ static void put_le32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)(v >> 24);
 }
 
-static void put_le64(uint8_t *p, uint64_t v)
-{
-    for (int i = 0; i < 8; i++) {
-        p[i] = (uint8_t)(v >> (8 * i));
-    }
-}
-
-static uint32_t ogg_crc_update(uint32_t crc, const uint8_t *data, size_t len)
-{
-    for (size_t i = 0; i < len; i++) {
-        crc ^= (uint32_t)data[i] << 24;
-        for (int bit = 0; bit < 8; bit++) {
-            crc = (crc & 0x80000000U) ? (crc << 1) ^ 0x04c11db7U : crc << 1;
-        }
-    }
-    return crc;
-}
-
-static esp_err_t ogg_write_page(FILE *out, uint32_t serial, uint32_t *sequence,
-                                uint8_t header_type, uint64_t granule_pos,
-                                const uint8_t *segments, int segment_count,
-                                const uint8_t *payload, size_t payload_len)
-{
-    if (segment_count < 0 || segment_count > OGG_MAX_SEGMENTS) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    uint8_t header[27 + OGG_MAX_SEGMENTS];
-    memcpy(header, "OggS", 4);
-    header[4] = 0;
-    header[5] = header_type;
-    put_le64(header + 6, granule_pos);
-    put_le32(header + 14, serial);
-    put_le32(header + 18, (*sequence)++);
-    put_le32(header + 22, 0);
-    header[26] = (uint8_t)segment_count;
-    if (segment_count > 0) {
-        memcpy(header + 27, segments, (size_t)segment_count);
-    }
-
-    uint32_t crc = ogg_crc_update(0, header, 27U + (size_t)segment_count);
-    crc = ogg_crc_update(crc, payload, payload_len);
-    put_le32(header + 22, crc);
-
-    if (fwrite(header, 1, 27U + (size_t)segment_count, out) !=
-        27U + (size_t)segment_count) {
-        return ESP_FAIL;
-    }
-    if (payload_len > 0 && fwrite(payload, 1, payload_len, out) != payload_len) {
-        return ESP_FAIL;
-    }
-    return ESP_OK;
-}
-
-static esp_err_t ogg_write_single_packet(FILE *out, uint32_t serial,
-                                         uint32_t *sequence, uint8_t header_type,
-                                         uint64_t granule_pos,
-                                         const uint8_t *packet, size_t packet_len)
-{
-    uint8_t segments[OGG_MAX_SEGMENTS];
-    int segment_count = 0;
-    size_t remaining = packet_len;
-    while (remaining >= 255) {
-        if (segment_count >= OGG_MAX_SEGMENTS) {
-            return ESP_ERR_INVALID_SIZE;
-        }
-        segments[segment_count++] = 255;
-        remaining -= 255;
-    }
-    if (segment_count >= OGG_MAX_SEGMENTS) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    segments[segment_count++] = (uint8_t)remaining;
-
-    return ogg_write_page(out, serial, sequence, header_type, granule_pos,
-                          segments, segment_count, packet, packet_len);
-}
-
-static esp_err_t ogg_flush_audio_page(ogg_writer_t *w, uint8_t header_type)
-{
-    if (w->segment_count == 0 && header_type == 0) {
-        return ESP_OK;
-    }
-    esp_err_t err = ogg_write_page(w->file, w->serial, &w->sequence, header_type,
-                                   w->granule_pos, w->segments, w->segment_count,
-                                   w->payload, w->payload_len);
-    w->segment_count = 0;
-    w->payload_len = 0;
-    return err;
-}
-
-static int opus_lacing_segments(size_t packet_len)
-{
-    return (int)(packet_len / 255) + 1;
-}
-
-static esp_err_t ogg_queue_audio_packet(ogg_writer_t *w, const uint8_t *packet,
-                                        size_t packet_len, uint64_t granule_pos)
-{
-    int need_segments = opus_lacing_segments(packet_len);
-    if (need_segments > OGG_MAX_SEGMENTS || packet_len > OGG_PAGE_PAYLOAD_BYTES) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    if (w->segment_count + need_segments > OGG_MAX_SEGMENTS ||
-        w->payload_len + packet_len > OGG_PAGE_PAYLOAD_BYTES) {
-        esp_err_t err = ogg_flush_audio_page(w, 0);
-        if (err != ESP_OK) {
-            return err;
-        }
-    }
-
-    size_t remaining = packet_len;
-    while (remaining >= 255) {
-        w->segments[w->segment_count++] = 255;
-        remaining -= 255;
-    }
-    w->segments[w->segment_count++] = (uint8_t)remaining;
-    memcpy(w->payload + w->payload_len, packet, packet_len);
-    w->payload_len += packet_len;
-    w->granule_pos = granule_pos;
-    return ESP_OK;
-}
-
-static esp_err_t ogg_write_opus_headers(FILE *out, uint32_t serial,
-                                        uint32_t *sequence,
-                                        uint32_t input_sample_rate)
-{
-    uint8_t head[19] = { 0 };
-    memcpy(head, "OpusHead", 8);
-    head[8] = 1;        /* version */
-    head[9] = 1;        /* mono */
-    put_le16(head + 10, 0);
-    put_le32(head + 12, input_sample_rate);
-    put_le16(head + 16, 0);
-    head[18] = 0;       /* no channel mapping table for mono/stereo */
-    esp_err_t err = ogg_write_single_packet(out, serial, sequence, 0x02, 0, head, sizeof head);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    const char vendor[] = "open-plaud";
-    uint8_t tags[8 + 4 + sizeof(vendor) - 1 + 4];
-    memcpy(tags, "OpusTags", 8);
-    put_le32(tags + 8, sizeof(vendor) - 1);
-    memcpy(tags + 12, vendor, sizeof(vendor) - 1);
-    put_le32(tags + 12 + sizeof(vendor) - 1, 0);
-    return ogg_write_single_packet(out, serial, sequence, 0, 0, tags, sizeof tags);
-}
-
 static void write_pcm_wav_header(uint8_t *h, uint32_t sample_rate,
                                  uint16_t channels, uint16_t bits,
                                  uint32_t data_bytes)
@@ -648,68 +481,22 @@ static upload_plan_t make_upload_plan(FILE *file, long file_size)
     return plan;
 }
 
-static esp_err_t make_temp_opus_path(const char *path, char *out, size_t out_len)
-{
-    int n = snprintf(out, out_len, "%s.opus.tmp", path);
-    return (n < 0 || (size_t)n >= out_len) ? ESP_ERR_INVALID_SIZE : ESP_OK;
-}
-
-static esp_err_t make_opus_upload_filename(const char *path, char *out, size_t out_len)
-{
-    const char *base = strrchr(path, '/');
-    base = base ? base + 1 : path;
-    const char *dot = strrchr(base, '.');
-    int stem_len = dot && dot > base ? (int)(dot - base) : (int)strlen(base);
-    int n = snprintf(out, out_len, "%.*s.opus", stem_len, base);
-    return (n < 0 || (size_t)n >= out_len) ? ESP_ERR_INVALID_SIZE : ESP_OK;
-}
-
 static esp_err_t encode_file_ogg_opus(FILE *file, const upload_plan_t *plan,
                                       const char *src_path, char *tmp_path,
                                       size_t tmp_path_len, long *out_size)
 {
     ESP_RETURN_ON_FALSE(plan && plan->compress_opus, ESP_ERR_INVALID_ARG, TAG, "opus plan");
-    ESP_RETURN_ON_ERROR(make_temp_opus_path(src_path, tmp_path, tmp_path_len),
+    ESP_RETURN_ON_ERROR(opus_ogg_temp_path_for_wav(src_path, tmp_path, tmp_path_len),
                         TAG, "opus temp path");
     if (fseek(file, (long)plan->data_offset, SEEK_SET) != 0) {
         return ESP_FAIL;
     }
 
-    FILE *out = fopen(tmp_path, "wb");
-    if (!out) {
-        ESP_LOGW(TAG, "cannot create temporary Opus file %s", tmp_path);
-        return ESP_FAIL;
-    }
-
-    int opus_err = OPUS_OK;
-    OpusEncoder *enc = opus_encoder_create((opus_int32)plan->sample_rate, 1,
-                                           OPUS_APPLICATION_VOIP, &opus_err);
-    if (!enc || opus_err != OPUS_OK) {
-        if (enc) {
-            opus_encoder_destroy(enc);
-        }
-        fclose(out);
-        remove(tmp_path);
-        ESP_LOGW(TAG, "Opus encoder create failed: %d", opus_err);
-        return ESP_FAIL;
-    }
-    opus_encoder_ctl(enc, OPUS_SET_BITRATE(CONFIG_OPEN_PLAUD_OPUS_BITRATE));
-    opus_encoder_ctl(enc, OPUS_SET_COMPLEXITY(3));
-    opus_encoder_ctl(enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
-    opus_encoder_ctl(enc, OPUS_SET_VBR(1));
-
-    uint32_t sequence = 0;
-    const uint32_t serial = esp_random();
-    esp_err_t err = ogg_write_opus_headers(out, serial, &sequence, plan->sample_rate);
-    memset(&s_ogg_writer, 0, sizeof(s_ogg_writer));
-    s_ogg_writer.file = out;
-    s_ogg_writer.serial = serial;
-    s_ogg_writer.sequence = sequence;
-
-    const uint32_t frame_samples = plan->sample_rate / (1000 / OPUS_FRAME_MS);
+    esp_err_t err = opus_ogg_open(&s_upload_opus_writer, tmp_path, plan->sample_rate,
+                                  CONFIG_OPEN_PLAUD_OPUS_BITRATE);
     const uint32_t frame_bytes = (uint32_t)plan->source_channels * 2;
+    const uint32_t frame_samples = plan->sample_rate / (1000 / OPUS_OGG_FRAME_MS);
     uint32_t remaining_samples = plan->sample_count;
-    uint32_t processed_samples = 0;
 
     while (err == ESP_OK && remaining_samples > 0) {
         uint32_t samples_this_frame = remaining_samples < frame_samples ?
@@ -735,44 +522,14 @@ static esp_err_t encode_file_ogg_opus(FILE *file, const upload_plan_t *plan,
                 s_opus_pcm[i] = (int16_t)(((int32_t)left + (int32_t)right) / 2);
             }
         }
-        if (samples_this_frame < frame_samples) {
-            memset(s_opus_pcm + samples_this_frame, 0,
-                   (frame_samples - samples_this_frame) * sizeof(s_opus_pcm[0]));
-        }
-
-        int packet_len = opus_encode(enc, s_opus_pcm, (int)frame_samples,
-                                     s_opus_packet, sizeof(s_opus_packet));
-        if (packet_len < 0) {
-            ESP_LOGW(TAG, "Opus encode failed: %d", packet_len);
-            err = ESP_FAIL;
-            break;
-        }
-        processed_samples += samples_this_frame;
+        err = opus_ogg_write_pcm(&s_upload_opus_writer, s_opus_pcm, samples_this_frame);
         remaining_samples -= samples_this_frame;
-        uint64_t granule = ((uint64_t)processed_samples * 48000U) / plan->sample_rate;
-        err = ogg_queue_audio_packet(&s_ogg_writer, s_opus_packet, (size_t)packet_len, granule);
     }
 
     if (err == ESP_OK) {
-        err = ogg_flush_audio_page(&s_ogg_writer, 0x04);
-    }
-    opus_encoder_destroy(enc);
-
-    if (err == ESP_OK && fflush(out) != 0) {
-        err = ESP_FAIL;
-    }
-    if (err == ESP_OK && fseek(out, 0, SEEK_END) == 0) {
-        long size = ftell(out);
-        if (size > 0) {
-            *out_size = size;
-        } else {
-            err = ESP_FAIL;
-        }
-    } else if (err == ESP_OK) {
-        err = ESP_FAIL;
-    }
-    if (fclose(out) != 0 && err == ESP_OK) {
-        err = ESP_FAIL;
+        err = opus_ogg_close(&s_upload_opus_writer, out_size);
+    } else if (s_upload_opus_writer.open) {
+        opus_ogg_abort(&s_upload_opus_writer, tmp_path);
     }
     if (err != ESP_OK) {
         remove(tmp_path);
@@ -1033,36 +790,57 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
     upload_plan_t plan = make_upload_plan(file, file_size);
 
     char tmp_opus_path[96] = { 0 };
+    char sidecar_opus_path[96] = { 0 };
     char opus_filename[40] = { 0 };
+    bool uploading_opus = false;
     bool uploading_temp_opus = false;
     uint32_t upload_bytes = plan.upload_bytes;
 
     if (plan.compress_opus) {
-        long opus_size = 0;
-        ESP_LOGI(TAG, "encoding %s to Ogg Opus at %d bps",
-                 path, CONFIG_OPEN_PLAUD_OPUS_BITRATE);
-        err = encode_file_ogg_opus(file, &plan, path, tmp_opus_path,
-                                   sizeof(tmp_opus_path), &opus_size);
-        if (err == ESP_OK && opus_size > 0 && opus_size <= UINT32_MAX &&
-            make_opus_upload_filename(path, opus_filename, sizeof(opus_filename)) == ESP_OK) {
+        struct stat sidecar_st;
+        if (opus_ogg_path_for_wav(path, sidecar_opus_path, sizeof(sidecar_opus_path)) == ESP_OK &&
+            stat(sidecar_opus_path, &sidecar_st) == 0 &&
+            sidecar_st.st_size > 0 && sidecar_st.st_size <= UINT32_MAX &&
+            opus_ogg_upload_filename(path, opus_filename, sizeof(opus_filename)) == ESP_OK) {
             fclose(file);
-            file = fopen(tmp_opus_path, "rb");
+            file = fopen(sidecar_opus_path, "rb");
             if (!file) {
-                remove(tmp_opus_path);
                 return ESP_FAIL;
             }
-            uploading_temp_opus = true;
+            uploading_opus = true;
             plan.compress_adpcm = false;
             plan.downmix_stereo16_to_mono = false;
-            upload_bytes = (uint32_t)opus_size;
+            upload_bytes = (uint32_t)sidecar_st.st_size;
+            ESP_LOGI(TAG, "using recorded Opus sidecar %s (%u bytes)",
+                     sidecar_opus_path, (unsigned)upload_bytes);
         } else {
-            ESP_LOGW(TAG, "Opus encode failed; falling back to ADPCM transfer");
-            plan.compress_opus = false;
-            err = ESP_OK;
+            long opus_size = 0;
+            ESP_LOGI(TAG, "encoding %s to Ogg Opus at %d bps",
+                     path, CONFIG_OPEN_PLAUD_OPUS_BITRATE);
+            err = encode_file_ogg_opus(file, &plan, path, tmp_opus_path,
+                                       sizeof(tmp_opus_path), &opus_size);
+            if (err == ESP_OK && opus_size > 0 && opus_size <= UINT32_MAX &&
+                opus_ogg_upload_filename(path, opus_filename, sizeof(opus_filename)) == ESP_OK) {
+                fclose(file);
+                file = fopen(tmp_opus_path, "rb");
+                if (!file) {
+                    remove(tmp_opus_path);
+                    return ESP_FAIL;
+                }
+                uploading_opus = true;
+                uploading_temp_opus = true;
+                plan.compress_adpcm = false;
+                plan.downmix_stereo16_to_mono = false;
+                upload_bytes = (uint32_t)opus_size;
+            } else {
+                ESP_LOGW(TAG, "Opus encode failed; falling back to ADPCM transfer");
+                plan.compress_opus = false;
+                err = ESP_OK;
+            }
         }
     }
 
-    if (!uploading_temp_opus &&
+    if (!uploading_opus &&
         fseek(file, (plan.downmix_stereo16_to_mono || plan.compress_adpcm) ?
               (long)plan.data_offset : 0, SEEK_SET) != 0) {
         fclose(file);
@@ -1082,8 +860,8 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
 
     const char *filename = strrchr(path, '/');
     filename = filename ? filename + 1 : path;
-    const char *upload_filename = uploading_temp_opus ? opus_filename : filename;
-    const char *part_content_type = uploading_temp_opus ? OGG_OPUS_MEDIA_TYPE :
+    const char *upload_filename = uploading_opus ? opus_filename : filename;
+    const char *part_content_type = uploading_opus ? OPUS_OGG_MEDIA_TYPE :
                                     (plan.compress_adpcm ? OPAD_MEDIA_TYPE : "audio/wav");
     const char *boundary = "open-plaud-esp32s3";
     char head[256];
@@ -1151,11 +929,11 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
 
     ESP_LOGI(TAG, "uploading %s (%ld bytes%s%u bytes) -> %s",
              path, file_size,
-             uploading_temp_opus ? ", Ogg Opus stream " :
+             uploading_opus ? ", Ogg Opus stream " :
              plan.compress_adpcm ? ", compressed stream " :
              (plan.downmix_stereo16_to_mono ? ", mono stream " : ", stream "),
              (unsigned)upload_bytes, url);
-    if (uploading_temp_opus) {
+    if (uploading_opus) {
         ESP_LOGI(TAG, "uploading %s as %s", filename, upload_filename);
     } else if (plan.compress_adpcm) {
         ESP_LOGI(TAG, "compressing %s to Open Plaud ADPCM for transfer", filename);
@@ -1171,7 +949,7 @@ esp_err_t net_upload_wav(const char *path, net_upload_progress_fn progress, void
     }
 
     if (err == ESP_OK) {
-        if (uploading_temp_opus) {
+        if (uploading_opus) {
             err = upload_file_passthrough(client, file, upload_filename, path,
                                           upload_bytes, progress, ctx);
         } else if (plan.compress_adpcm) {

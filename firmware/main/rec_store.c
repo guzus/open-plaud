@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include "esp_log.h"
 #include "net_upload.h"
+#include "opus_ogg.h"
 #include "sdcard.h"
 
 static const char *TAG = "rec_store";
@@ -160,6 +161,22 @@ esp_err_t rec_store_mark_sent(const char *path)
         ESP_LOGE(TAG, "rename(%s -> %s) failed: errno=%d", path, dest, errno);
         return ESP_FAIL;
     }
+
+#if CONFIG_OPEN_PLAUD_OPUS_TRANSFERS
+    char sidecar[48];
+    char sidecar_dest[48];
+    if (opus_ogg_path_for_wav(path, sidecar, sizeof(sidecar)) == ESP_OK &&
+        opus_ogg_path_for_wav(dest, sidecar_dest, sizeof(sidecar_dest)) == ESP_OK) {
+        struct stat st;
+        if (stat(sidecar, &st) == 0) {
+            remove(sidecar_dest);
+            if (rename(sidecar, sidecar_dest) != 0) {
+                ESP_LOGW(TAG, "rename(%s -> %s) failed: errno=%d",
+                         sidecar, sidecar_dest, errno);
+            }
+        }
+    }
+#endif
     return ESP_OK;
 }
 

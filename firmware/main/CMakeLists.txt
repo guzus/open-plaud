@@ -9,6 +9,7 @@ idf_component_register(
         "status.c"
         "wav.c"
         "net_upload.c"
+        "opus_ogg.c"
         "ble_audio.c"
         "ble_companion.c"
     INCLUDE_DIRS "."
