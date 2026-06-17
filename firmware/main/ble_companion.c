@@ -656,18 +656,24 @@ static int access_cb(uint16_t conn_handle, uint16_t attr_handle,
 static void start_advertising(void)
 {
     struct ble_hs_adv_fields fields = { 0 };
+    struct ble_hs_adv_fields rsp_fields = { 0 };
     const char *name = ble_svc_gap_device_name();
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name = (uint8_t *)name;
     fields.name_len = strlen(name);
     fields.name_is_complete = 1;
-    fields.uuids128 = &s_svc_uuid;
-    fields.num_uuids128 = 1;
-    fields.uuids128_is_complete = 1;
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "adv fields failed: %d", rc);
         return;
+    }
+
+    rsp_fields.uuids128 = &s_svc_uuid;
+    rsp_fields.num_uuids128 = 1;
+    rsp_fields.uuids128_is_complete = 1;
+    rc = ble_gap_adv_rsp_set_fields(&rsp_fields);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "scan response fields failed: %d", rc);
     }
 
     struct ble_gap_adv_params params = {

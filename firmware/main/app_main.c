@@ -426,6 +426,7 @@ static void do_sync(int pending)
 void app_main(void)
 {
     ESP_LOGI(TAG, "open-plaud recorder boot");
+    power_init();   /* assert BAT_EN before any slow boot work so battery power latches */
     if (status_init() == ESP_OK) {
         status_show(OPEN_PLAUD_STATUS_BOOT);
     }
@@ -464,7 +465,6 @@ void app_main(void)
         sdcard_unmount();
         return;
     }
-    power_init();   /* battery sense is non-fatal: UI just shows "--" if absent */
 
     /* Logs the GPIO behind each on-screen label (mapping verified on hardware). */
     ESP_LOGI(TAG, "button map: LEFT=GPIO%d (power/screen, cancel) "
