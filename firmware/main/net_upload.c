@@ -19,7 +19,7 @@ static const char *TAG = "net_upload";
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
-#define UPLOAD_CHUNK_BYTES 4096
+#define UPLOAD_CHUNK_BYTES 16384
 #define WAV_HEADER_BYTES   44
 #define OPAD_HEADER_BYTES  22
 #define OPAD_MEDIA_TYPE    "application/vnd.openplaud.adpcm"
@@ -192,6 +192,7 @@ static esp_err_t wifi_apply_config(void)
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "wifi_mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg), TAG, "wifi_config");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE), TAG, "wifi_ps");
     ESP_LOGI(TAG, "Wi-Fi configured for SSID \"%s\"", ssid);
     return ESP_OK;
 }

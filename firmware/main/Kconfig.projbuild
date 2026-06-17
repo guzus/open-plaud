@@ -54,12 +54,16 @@ menu "open-plaud"
 
     config OPEN_PLAUD_UPLOAD_TIMEOUT_MS
         int "Upload timeout in milliseconds"
-        default 30000
+        default 180000
         range 5000 300000
+        help
+            Upper bound for Wi-Fi connect and HTTP upload operations. Cloud TLS
+            uploads from an ESP32 can be slow, especially for queued clips, so
+            keep this above the expected full body transfer time.
 
     config OPEN_PLAUD_COMPRESS_TRANSFERS
         bool "Compress Wi-Fi/BLE transfer payloads with Open Plaud ADPCM"
-        default n
+        default y
         help
             Encode canonical 16-bit PCM WAV clips into the small Open Plaud ADPCM
             transfer container before upload. The server must support
