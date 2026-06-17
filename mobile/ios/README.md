@@ -20,7 +20,41 @@ cd mobile/ios
 swift run open-plaud-mobile-verify
 swift run open-plaud-companion-verify
 swift build --product OpenPlaud
+xcodegen generate
+xcodebuild -project OpenPlaud.xcodeproj -scheme OpenPlaudApp -destination 'generic/platform=iOS Simulator' build
+xcodebuild -project OpenPlaud.xcodeproj -scheme OpenPlaudApp -destination 'generic/platform=iOS' -configuration Release -archivePath build/OpenPlaudApp.xcarchive archive
+xcodebuild -exportArchive -archivePath build/OpenPlaudApp.xcarchive -exportPath build/OpenPlaudApp-Export -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates
 ```
+
+The SwiftPM `OpenPlaud` product is useful for fast compile checks, but it
+archives as a command-line binary. Use the generated Xcode project when making
+an `.xcarchive` for TestFlight.
+
+TestFlight upload requires an authenticated Apple Developer account in Xcode or
+an App Store Connect API key passed to `xcodebuild` with
+`-authenticationKeyPath`, `-authenticationKeyID`, and
+`-authenticationKeyIssuerID`.
+
+## Xcode Cloud
+
+Xcode Cloud builds from the Git checkout it receives, so keep
+`OpenPlaud.xcodeproj` and its shared `OpenPlaudApp` scheme committed. The
+`project.yml` file remains the reproducible source for regenerating the project
+locally with XcodeGen, but Xcode Cloud should build the checked-in project
+directly.
+
+To create the first workflow:
+
+1. Push this repository to GitHub with `mobile/ios/OpenPlaud.xcodeproj`
+   committed.
+2. Open `mobile/ios/OpenPlaud.xcodeproj` in Xcode.
+3. Sign in to Xcode with the Apple Developer team `GGYW4A4D65`.
+4. Select `OpenPlaudApp` as the active scheme.
+5. Use `Product > Xcode Cloud > Create Workflow`.
+6. Choose the repository `guzus/open-plaud`, the project
+   `mobile/ios/OpenPlaud.xcodeproj`, and the scheme `OpenPlaudApp`.
+7. Add an archive action for `Release` and enable TestFlight distribution after
+   the first cloud archive succeeds.
 
 ## Transcription contract
 

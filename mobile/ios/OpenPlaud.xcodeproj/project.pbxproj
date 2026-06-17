@@ -1,0 +1,371 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2A0EA96C26100BEB4333D988 /* OpenPlaudCompanion in Frameworks */ = {isa = PBXBuildFile; productRef = FB029CB256669431BE8E1CCF /* OpenPlaudCompanion */; };
+		5CF5B843CEF4F2DE5AD72ED1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 44928036BC7B03D0D00B79E8 /* Assets.xcassets */; };
+		A4F3B1A2DB890A013E855034 /* OpenPlaudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD04BC9E140537324F697EBA /* OpenPlaudApp.swift */; };
+		FEFF6E5669F49A3BB22E1BFB /* OpenPlaudMobileTranscription in Frameworks */ = {isa = PBXBuildFile; productRef = 71E4B17969157083B717864C /* OpenPlaudMobileTranscription */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		44928036BC7B03D0D00B79E8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5637B35E5692CF61A50D6778 /* OpenPlaudApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OpenPlaudApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		646A64EA6EBF8EEB88394C84 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		64B9D91FABB5D29BE5F21D6F /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = .; sourceTree = SOURCE_ROOT; };
+		AD04BC9E140537324F697EBA /* OpenPlaudApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenPlaudApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		71E706354594E325B252C9AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2A0EA96C26100BEB4333D988 /* OpenPlaudCompanion in Frameworks */,
+				FEFF6E5669F49A3BB22E1BFB /* OpenPlaudMobileTranscription in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		05E5F42FD7622F837947B5D4 = {
+			isa = PBXGroup;
+			children = (
+				64B9D91FABB5D29BE5F21D6F /* ios */,
+				82DDB7C58C39C68D91500505 /* OpenPlaud */,
+				3D4DEA47E74DF0AB1B4D0B31 /* OpenPlaud */,
+				ADC809F634FC75E36BFF273E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		3D4DEA47E74DF0AB1B4D0B31 /* OpenPlaud */ = {
+			isa = PBXGroup;
+			children = (
+				AD04BC9E140537324F697EBA /* OpenPlaudApp.swift */,
+			);
+			name = OpenPlaud;
+			path = Sources/OpenPlaud;
+			sourceTree = "<group>";
+		};
+		82DDB7C58C39C68D91500505 /* OpenPlaud */ = {
+			isa = PBXGroup;
+			children = (
+				44928036BC7B03D0D00B79E8 /* Assets.xcassets */,
+				646A64EA6EBF8EEB88394C84 /* Info.plist */,
+			);
+			name = OpenPlaud;
+			path = App/OpenPlaud;
+			sourceTree = "<group>";
+		};
+		ADC809F634FC75E36BFF273E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5637B35E5692CF61A50D6778 /* OpenPlaudApp.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7AF7DC4DBD1C6ED2ADF9BE7E /* OpenPlaudApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D7D522304C6971A955E59D48 /* Build configuration list for PBXNativeTarget "OpenPlaudApp" */;
+			buildPhases = (
+				89A48D0EFB94EBAE6834B187 /* Sources */,
+				1F52C2A3589805E5DF60CCEB /* Resources */,
+				71E706354594E325B252C9AA /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OpenPlaudApp;
+			packageProductDependencies = (
+				FB029CB256669431BE8E1CCF /* OpenPlaudCompanion */,
+				71E4B17969157083B717864C /* OpenPlaudMobileTranscription */,
+			);
+			productName = OpenPlaudApp;
+			productReference = 5637B35E5692CF61A50D6778 /* OpenPlaudApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		711C46002E858BC913D31774 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					7AF7DC4DBD1C6ED2ADF9BE7E = {
+						DevelopmentTeam = GGYW4A4D65;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 3BD3EC22E670988F2FE3940E /* Build configuration list for PBXProject "OpenPlaud" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 05E5F42FD7622F837947B5D4;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				434360BE54D5D5692B56F9E0 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = ADC809F634FC75E36BFF273E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7AF7DC4DBD1C6ED2ADF9BE7E /* OpenPlaudApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1F52C2A3589805E5DF60CCEB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5CF5B843CEF4F2DE5AD72ED1 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		89A48D0EFB94EBAE6834B187 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4F3B1A2DB890A013E855034 /* OpenPlaudApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		18F8C5A57C25B1FD43F7A3EB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GGYW4A4D65;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/OpenPlaud/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.guzus.openplaud;
+				PRODUCT_NAME = OpenPlaud;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		80F8895312A72A3DCBAC3318 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9005AC2104EC1E964082ED0D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GGYW4A4D65;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = App/OpenPlaud/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.guzus.openplaud;
+				PRODUCT_NAME = OpenPlaud;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DA544A051BB22754C5636592 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3BD3EC22E670988F2FE3940E /* Build configuration list for PBXProject "OpenPlaud" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				80F8895312A72A3DCBAC3318 /* Debug */,
+				DA544A051BB22754C5636592 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D7D522304C6971A955E59D48 /* Build configuration list for PBXNativeTarget "OpenPlaudApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				18F8C5A57C25B1FD43F7A3EB /* Debug */,
+				9005AC2104EC1E964082ED0D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		434360BE54D5D5692B56F9E0 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		71E4B17969157083B717864C /* OpenPlaudMobileTranscription */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenPlaudMobileTranscription;
+		};
+		FB029CB256669431BE8E1CCF /* OpenPlaudCompanion */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = OpenPlaudCompanion;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 711C46002E858BC913D31774 /* Project object */;
+}

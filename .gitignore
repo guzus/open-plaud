@@ -23,6 +23,7 @@ htmlcov/
 
 # SwiftPM build artifacts
 mobile/ios/.build/
+mobile/ios/.swiftpm/
 mac-client/.build/
 mac-client/.swiftpm/
 mac-client/Package.resolved
