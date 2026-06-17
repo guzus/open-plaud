@@ -1,5 +1,6 @@
 dependencies:
-  idf: ">=5.3"
+  idf: '>=5.3'
   # ES7210 (ADC) / ES8311 (DAC) codec abstraction — mirrors Espressif's
   # i2s_es7210_tdm example. Pulls the ES7210 driver used in audio.c.
-  espressif/esp_codec_dev: ">=1.5.0"
+  espressif/esp_codec_dev: '>=1.5.0'
+  78/esp-opus: ^1.0.5

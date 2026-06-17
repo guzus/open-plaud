@@ -135,10 +135,12 @@ New recordings are stored as mono WAVs. Older stereo WAVs already queued on the
 SD card are downmixed in the upload stream without rewriting the original file,
 then moved to `/sdcard/sent/` after a 2xx response.
 
-Optional Wi-Fi compression (`OPEN_PLAUD_COMPRESS_TRANSFERS`) sends
-`application/vnd.openplaud.adpcm` in an Open Plaud ADPCM container. Enable it
-only after the target server has the ADPCM decoder deployed. BLE chunk transfer
-uses the same IMA ADPCM compression family for compact iPhone pulls.
+Optional Wi-Fi compression (`OPEN_PLAUD_COMPRESS_TRANSFERS`) prefers Ogg Opus
+when `OPEN_PLAUD_OPUS_TRANSFERS` is enabled. The firmware encodes a temporary
+`.opus` file on SD, uploads it as `audio/ogg`, and deletes the temp file after
+the request. If Opus encoding fails, uploads fall back to the Open Plaud ADPCM
+container (`application/vnd.openplaud.adpcm`). BLE chunk transfer still uses the
+IMA ADPCM compression family for compact iPhone pulls.
 
 Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 
@@ -152,7 +154,8 @@ Firmware settings live under `idf.py menuconfig` → **open-plaud**:
 - `OPEN_PLAUD_AUDIO_READ_TIMEOUT_MS`
 - `OPEN_PLAUD_AUDIO_READ_MAX_ERRORS`
 - `OPEN_PLAUD_BLE_COMPANION` (requires ESP-IDF Bluetooth/NimBLE enabled)
-- `OPEN_PLAUD_COMPRESS_TRANSFERS` (requires a server that supports Open Plaud ADPCM ingest)
+- `OPEN_PLAUD_COMPRESS_TRANSFERS`
+- `OPEN_PLAUD_OPUS_TRANSFERS` / `OPEN_PLAUD_OPUS_BITRATE` (default 24 kbps mono voice)
 - `OPEN_PLAUD_SDMMC_WIDTH` (1-bit default; 4-bit only after hardware validation)
 
 ## Validate on first hardware bring-up

@@ -21,10 +21,11 @@ Live PoC: **https://openplaud.guzus.xyz**
 | `GET`  | `/` | HTML list of recordings |
 | `GET`  | `/rec/{id}` | recording detail: audio player, transcript, summary |
 
-`POST /v1/recordings` accepts ordinary audio uploads and the Open Plaud ADPCM
-container (`.opadpcm`, `application/vnd.openplaud.adpcm`). ADPCM uploads are
-decoded immediately and stored as normal 16-bit PCM WAV, so playback, export,
-Deepgram, and existing clients continue to see WAV.
+`POST /v1/recordings` accepts ordinary audio uploads, Ogg Opus (`.opus`,
+`audio/ogg`), and the Open Plaud ADPCM container (`.opadpcm`,
+`application/vnd.openplaud.adpcm`). ADPCM uploads are decoded immediately and
+stored as normal 16-bit PCM WAV. Ogg Opus uploads stay encoded and are passed
+through to Deepgram as `audio/ogg`.
 
 `Recording` JSON matches the Python `RecordingResponse` field-for-field
 (`id, status, filename, size_bytes, created_at, transcript, summary, error`).

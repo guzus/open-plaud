@@ -89,8 +89,9 @@ Commands are UTF-8 JSON. Supported app-side commands:
 - `set_transfer_preference`
 
 Transfer preferences expose `wifi` or `bluetooth` routes and `mono_wav`,
-`ima_adpcm`, or `opus` compression choices. Firmware currently supports mono WAV
-and IMA ADPCM; `opus` is reserved for a future codec.
+`ima_adpcm`, or `opus` compression choices. Firmware Wi-Fi sync prefers Ogg Opus
+when enabled and falls back to IMA ADPCM; Bluetooth chunk transfer currently uses
+raw WAV or IMA ADPCM.
 
 Do not hardcode hotspot credentials or auth tokens in source. Enter them in the
 app at runtime and send them to the device over the BLE command characteristic.

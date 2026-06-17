@@ -52,11 +52,14 @@ var audioSuffixes = map[string]string{
 	".flac": "audio/flac",
 	".m4a":  "audio/mp4",
 	".mp3":  "audio/mpeg",
+	".ogg":  "audio/ogg",
+	".opus": "audio/ogg",
 }
 
 var audioMediaTypes = map[string]bool{
 	"audio/wav": true, "audio/x-wav": true,
 	"audio/flac": true, "audio/mpeg": true, "audio/mp4": true,
+	"audio/ogg": true, "application/ogg": true, "audio/opus": true,
 }
 
 const (

@@ -166,6 +166,39 @@ func TestCompressedADPCMUploadStoresDecodedWAV(t *testing.T) {
 	}
 }
 
+func TestOggOpusUploadStoresEncodedBlob(t *testing.T) {
+	s := &server{storageDir: t.TempDir(), maxBytes: 1 << 20}
+	original := []byte("OggS\x00\x02tiny-opus-placeholder")
+	req := multipartUploadRequest(t, "clip.opus", "audio/ogg", original)
+	rr := httptest.NewRecorder()
+
+	s.handleUpload(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST opus status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var rec Recording
+	if err := json.Unmarshal(rr.Body.Bytes(), &rec); err != nil {
+		t.Fatalf("decode recording: %v", err)
+	}
+	if rec.ContentType != "audio/ogg" {
+		t.Fatalf("ContentType = %q, want audio/ogg", rec.ContentType)
+	}
+	if rec.Filename != "clip.opus" {
+		t.Fatalf("Filename = %q, want clip.opus", rec.Filename)
+	}
+	if !strings.HasSuffix(rec.StoredName, ".opus") {
+		t.Fatalf("StoredName = %q, want .opus suffix", rec.StoredName)
+	}
+	stored, err := os.ReadFile(filepath.Join(s.storageDir, rec.StoredName))
+	if err != nil {
+		t.Fatalf("read stored opus: %v", err)
+	}
+	if !bytes.Equal(stored, original) {
+		t.Fatal("opus upload was modified")
+	}
+}
+
 func TestNormalWAVUploadCompatibility(t *testing.T) {
 	s := &server{storageDir: t.TempDir(), maxBytes: 1 << 20}
 	original := tinyPCM16WAV(t, 16000, 1, []int16{0, 512, -512})

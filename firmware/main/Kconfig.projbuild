@@ -62,13 +62,31 @@ menu "open-plaud"
             keep this above the expected full body transfer time.
 
     config OPEN_PLAUD_COMPRESS_TRANSFERS
-        bool "Compress Wi-Fi/BLE transfer payloads with Open Plaud ADPCM"
+        bool "Compress Wi-Fi/BLE transfer payloads"
         default y
         help
-            Encode canonical 16-bit PCM WAV clips into the small Open Plaud ADPCM
-            transfer container before upload. The server must support
-            application/vnd.openplaud.adpcm and decode it back to PCM WAV before
-            transcription/storage. Leave off when targeting older servers.
+            Encode canonical 16-bit PCM WAV clips before upload. Opus is used
+            when enabled; otherwise the firmware falls back to the Open Plaud
+            ADPCM transfer container. Leave off when targeting older servers.
+
+    config OPEN_PLAUD_OPUS_TRANSFERS
+        bool "Prefer Ogg Opus for Wi-Fi transfer payloads"
+        default y
+        depends on OPEN_PLAUD_COMPRESS_TRANSFERS
+        help
+            Encode queued WAV clips to a temporary Ogg Opus file on SD before
+            upload. This greatly reduces cloud upload time versus ADPCM while
+            keeping the original WAV as the archival source until the upload
+            succeeds.
+
+    config OPEN_PLAUD_OPUS_BITRATE
+        int "Ogg Opus Wi-Fi transfer bitrate"
+        default 24000
+        range 12000 64000
+        depends on OPEN_PLAUD_OPUS_TRANSFERS
+        help
+            Opus target bitrate in bits per second for mono voice uploads.
+            24000 is a conservative transcription-quality default.
 
     config OPEN_PLAUD_BLE_COMPANION
         bool "Enable BLE companion service"
