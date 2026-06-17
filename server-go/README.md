@@ -39,7 +39,7 @@ curl -F "file=@sample.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
 ```
 
 Config (env): `PORT` (default 8000), `OP_STORAGE_DIR` (default `/data`),
-`OP_UPLOAD_MAX_BYTES` (default 200 MiB), `OP_AUTH_TOKEN` (default empty = open),
+`OP_UPLOAD_MAX_BYTES` (default 200 MiB), `OP_AUTH_TOKEN` (default empty = open; shared API token/browser password),
 `DEEPGRAM_API_KEY` (default empty = transcription off), `DEEPGRAM_MODEL`
 (default `nova-3`), `FIREWORKS_API_KEY` (default empty = summarization off),
 `FIREWORKS_MODEL` (default `accounts/fireworks/models/kimi-k2p7-code`). No external dependencies, no
@@ -98,11 +98,11 @@ line in `firmware/main/net_upload.c` (a Kconfig string + `esp_http_client_set_he
 esp_http_client_set_header(client, "Authorization", "Bearer " CONFIG_OPEN_PLAUD_AUTH_TOKEN);
 ```
 
-**Browser access with auth on:** a browser can't send a bearer header, so visit
-`/?token=<token>` once — the server sets an HttpOnly cookie and all links, the
-detail page, and the `<audio>` element work for the rest of the session. (The
-token rides in the URL on that first request; for a real deployment prefer a
-proper session login.) To reopen for a quick demo, clear the variable:
+**Browser access with auth on:** open `/login` (or any protected page) and enter
+the same `OP_AUTH_TOKEN` value as the password. The server sets an HttpOnly
+`op_session` cookie for the browser so the list, detail pages, export links, and
+`<audio>` element work without putting the secret in the URL. `?token=...` is
+not accepted. To reopen for a quick demo, clear the variable:
 `railway variables --set "OP_AUTH_TOKEN="`.
 
 ## Deploy to Railway

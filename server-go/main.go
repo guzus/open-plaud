@@ -24,6 +24,7 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -56,6 +57,11 @@ var audioMediaTypes = map[string]bool{
 	"audio/wav": true, "audio/x-wav": true,
 	"audio/flac": true, "audio/mpeg": true, "audio/mp4": true,
 }
+
+const (
+	authSessionCookieName = "op_session"
+	authCookieMaxAge      = 86400
+)
 
 // Transcript mirrors the Python server's transcript shape (text + language +
 // segments). Deepgram pre-recorded gives us text and a detected language;
@@ -96,9 +102,9 @@ type Recording struct {
 }
 
 type server struct {
-	storageDir    string
-	maxBytes      int64
-	authToken     string // if non-empty, every route except /healthz needs "Authorization: Bearer <token>"
+	storageDir     string
+	maxBytes       int64
+	authToken      string // if non-empty, every route except /healthz needs bearer auth or browser login
 	deepgramKey    string // if non-empty, uploads are transcribed via Deepgram
 	deepgramModel  string
 	fireworksKey   string // if non-empty, transcripts are summarized via Fireworks (Kimi)
@@ -108,9 +114,9 @@ type server struct {
 func main() {
 	port := getenv("PORT", "8000")
 	srv := &server{
-		storageDir:    getenv("OP_STORAGE_DIR", "/data"),
-		maxBytes:      getenvInt64("OP_UPLOAD_MAX_BYTES", 200<<20), // 200 MiB (~50 min of 16k stereo)
-		authToken:     os.Getenv("OP_AUTH_TOKEN"),
+		storageDir:     getenv("OP_STORAGE_DIR", "/data"),
+		maxBytes:       getenvInt64("OP_UPLOAD_MAX_BYTES", 200<<20), // 200 MiB (~50 min of 16k stereo)
+		authToken:      os.Getenv("OP_AUTH_TOKEN"),
 		deepgramKey:    os.Getenv("DEEPGRAM_API_KEY"),
 		deepgramModel:  getenv("DEEPGRAM_MODEL", "nova-3"),
 		fireworksKey:   os.Getenv("FIREWORKS_API_KEY"),
@@ -155,60 +161,163 @@ func main() {
 	}
 }
 
-// auth optionally gates every route except /healthz behind a shared bearer token
-// (OP_AUTH_TOKEN). Off by default so the PoC is frictionless; set the env var to
-// require "Authorization: Bearer <token>". The device sends it with one
-// esp_http_client_set_header call. /healthz stays open for Railway's checks.
+// auth optionally gates every route except /healthz behind a shared secret
+// (OP_AUTH_TOKEN). API/device callers use "Authorization: Bearer <token>".
+// Browsers POST the same secret to /login and receive an HttpOnly session cookie.
+// /healthz stays open for Railway's checks.
 func (s *server) auth(next http.Handler) http.Handler {
-	match := func(c string) bool {
+	matchSecret := func(c string) bool {
 		// constant-time compare avoids leaking the token via response timing
 		return c != "" && subtle.ConstantTimeCompare([]byte(c), []byte(s.authToken)) == 1
+	}
+	matchSession := func(c string) bool {
+		return c != "" && subtle.ConstantTimeCompare([]byte(c), []byte(s.authSessionValue())) == 1
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authToken == "" || r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Token may arrive three ways: the Authorization header (devices/curl),
-		// a ?token=  query param (first browser visit), or the op_token cookie
-		// (browser navigation after the first visit).
-		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		query := r.URL.Query().Get("token")
-		ok := match(bearer) || match(query)
+		if r.URL.Path == "/login" {
+			s.handleLogin(w, r, matchSecret, matchSession)
+			return
+		}
+
+		// Token may arrive via the Authorization header (devices/curl) or via the
+		// browser session cookie set by /login. Query-string tokens are deliberately
+		// not accepted so secrets do not land in URLs, browser history, logs, or
+		// Referer headers.
+		bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		ok := matchSecret(bearer)
 		if !ok {
-			if c, err := r.Cookie("op_token"); err == nil {
-				ok = match(c.Value)
+			if c, err := r.Cookie(authSessionCookieName); err == nil {
+				ok = matchSession(c.Value)
 			}
 		}
 		if !ok {
+			if shouldRenderLogin(r) {
+				s.writeLoginForm(w, http.StatusUnauthorized, "", r.URL.RequestURI())
+				return
+			}
 			httpError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		// On a valid ?token, set a cookie so links and the <audio> element work
-		// without repeating the token in every URL, then (for GETs) redirect to
-		// the same path with ?token stripped — so the secret doesn't linger in
-		// the address bar, history, logs, or a Referer header.
-		if match(query) {
-			secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-			w.Header().Set("Cache-Control", "no-store") // don't let a cache keep the Set-Cookie
-			http.SetCookie(w, &http.Cookie{
-				Name: "op_token", Value: s.authToken, Path: "/",
-				HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode,
-				MaxAge: 86400,
-			})
-			if r.Method == http.MethodGet {
-				q := r.URL.Query()
-				q.Del("token")
-				target := r.URL.Path
-				if rq := q.Encode(); rq != "" {
-					target += "?" + rq
-				}
-				http.Redirect(w, r, target, http.StatusSeeOther)
-				return
-			}
-		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *server) handleLogin(
+	w http.ResponseWriter,
+	r *http.Request,
+	matchSecret func(string) bool,
+	matchSession func(string) bool,
+) {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		if c, err := r.Cookie(authSessionCookieName); err == nil && matchSession(c.Value) {
+			http.Redirect(w, r, loginRedirectTarget(r.URL.Query().Get("next")), http.StatusSeeOther)
+			return
+		}
+		s.writeLoginForm(w, http.StatusOK, "", r.URL.Query().Get("next"))
+	case http.MethodPost:
+		if err := r.ParseForm(); err != nil {
+			s.writeLoginForm(w, http.StatusBadRequest, "Could not read password.", r.FormValue("next"))
+			return
+		}
+		next := r.FormValue("next")
+		if !matchSecret(r.FormValue("password")) {
+			s.writeLoginForm(w, http.StatusUnauthorized, "Invalid password.", next)
+			return
+		}
+		s.setAuthSessionCookie(w, r)
+		http.Redirect(w, r, loginRedirectTarget(next), http.StatusSeeOther)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func shouldRenderLogin(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if strings.HasPrefix(r.URL.Path, "/v1/") {
+		return false
+	}
+	accept := r.Header.Get("Accept")
+	return accept == "" || strings.Contains(accept, "text/html") || strings.Contains(accept, "*/*")
+}
+
+func (s *server) writeLoginForm(w http.ResponseWriter, code int, message, next string) {
+	next = loginRedirectTarget(next)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+
+	var b strings.Builder
+	b.WriteString(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">`)
+	b.WriteString(`<title>open-plaud login</title>`)
+	b.WriteString(`<style>body{font:15px/1.5 system-ui,sans-serif;max-width:360px;margin:64px auto;padding:0 16px;color:#111}`)
+	b.WriteString(`h1{font-size:20px;margin-bottom:20px}label{display:block;margin-bottom:6px;color:#444}`)
+	b.WriteString(`input{box-sizing:border-box;width:100%;font:inherit;padding:10px 12px;border:1px solid #ccc;border-radius:6px}`)
+	b.WriteString(`button{font:inherit;margin-top:12px;padding:10px 14px;border:0;border-radius:6px;background:#111;color:white;cursor:pointer}`)
+	b.WriteString(`.error{color:#b00020;margin:0 0 12px}</style>`)
+	b.WriteString(`<h1>open-plaud</h1>`)
+	if message != "" {
+		fmt.Fprintf(&b, `<p class=error>%s</p>`, html.EscapeString(message))
+	}
+	fmt.Fprintf(&b, `<form method=post action="/login"><input type=hidden name=next value="%s">`, html.EscapeString(next))
+	b.WriteString(`<label for=password>Password</label>`)
+	b.WriteString(`<input id=password name=password type=password autocomplete=current-password autofocus required>`)
+	b.WriteString(`<button type=submit>Sign in</button></form>`)
+	_, _ = io.WriteString(w, b.String())
+}
+
+func (s *server) setAuthSessionCookie(w http.ResponseWriter, r *http.Request) {
+	secure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	w.Header().Set("Cache-Control", "no-store")
+	http.SetCookie(w, &http.Cookie{
+		Name:     authSessionCookieName,
+		Value:    s.authSessionValue(),
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   authCookieMaxAge,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "op_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
+func (s *server) authSessionValue() string {
+	sum := sha256.Sum256([]byte("open-plaud auth session\x00" + s.authToken))
+	return hex.EncodeToString(sum[:])
+}
+
+func loginRedirectTarget(raw string) string {
+	if raw == "" {
+		return "/"
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.IsAbs() || u.Host != "" || u.Path == "" || u.Path == "/login" {
+		return "/"
+	}
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return "/"
+	}
+	q := u.Query()
+	if q.Has("token") {
+		q.Del("token")
+		u.RawQuery = q.Encode()
+	}
+	return u.RequestURI()
 }
 
 // ---- handlers ---------------------------------------------------------------
