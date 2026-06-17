@@ -87,8 +87,9 @@ menu "open-plaud"
         range 0 3600
         help
             After this many seconds with no button press in the ready/idle
-            screen, the device enters deep sleep and wakes on a Record or Sync
-            press (~2 s back to ready). 0 = NEVER auto-sleep (the default).
+            screen, the device enters deep sleep and wakes on a Record press
+            (~2 s back to ready). 0 = NEVER auto-sleep (the default). Sync is
+            deliberately not a battery wake source.
 
             Deep sleep is OPT-IN on the Waveshare board for a hard reason: it
             powers down the USB-Serial/JTAG, and a deep-sleep WAKE does not bring
@@ -106,8 +107,9 @@ menu "open-plaud"
         range 0 600
         help
             While recording, the LCD backlight turns off after this many seconds
-            with no button press to save power; any button press turns it back
-            on. Recording continues regardless. 0 keeps the screen on.
+            with no button press to save power; Record/Left turn it back on, and
+            Sync turns it back on only while charging. Recording continues
+            regardless. 0 keeps the screen on.
 
     choice OPEN_PLAUD_SDMMC_WIDTH_CHOICE
         prompt "SDMMC bus width"

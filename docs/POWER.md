@@ -18,7 +18,7 @@ While *actively on*, the recorder is a **use-and-charge** device measured in
 
 **Deep sleep is implemented but ships DEFAULT OFF (opt-in)** on this board. It
 works — after `OPEN_PLAUD_IDLE_SLEEP_S` (>0) of idle the device sleeps and wakes on
-a Record/Sync press (verified on hardware) — *but* it powers down the
+a Record press — *but* it powers down the
 USB-Serial/JTAG and a deep-sleep **wake does NOT restore it** (only a full reset
 does). This board has **no reset button**, so enabling deep sleep can strand the
 device **un-reflashable + un-USB-recognizable until a battery power-cycle**. So it
@@ -85,10 +85,10 @@ self-discharge caps useful standby at a few months regardless.
 ## Deep sleep (implemented, ships DEFAULT OFF / opt-in)
 
 After `OPEN_PLAUD_IDLE_SLEEP_S` (> 0) with no button press, the device enters
-ESP32-S3 deep sleep and wakes on an **EXT1 button press**. Verified on hardware
-(2026-06-16): it sleeps, **stays** asleep (no spurious wake), wakes on **Record
-(GPIO4)** and **Sync (GPIO5)**, and does **not** wake on **Left (GPIO0)** — GPIO0
-is the boot strapping pin, deliberately excluded.
+ESP32-S3 deep sleep and wakes on a **Record EXT1 button press**. Sync/Middle is
+deliberately excluded so an accidental hold does not light the device while it is
+sleeping on battery. Left/GPIO0 is also excluded because it is the boot strapping
+pin.
 
 **Why it ships OFF (`= 0`):** deep sleep powers down the USB-Serial/JTAG, and a
 deep-sleep *wake does not restore it* — only a full reset does. This board has

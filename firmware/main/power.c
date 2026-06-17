@@ -20,11 +20,13 @@
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
+#if defined(BSP_CHG_STAT_GPIO)
+#include "driver/gpio.h"
+#endif
 
 static const char *TAG = "power";
 
 #if defined(BSP_BAT_ADC_GPIO)
-#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_adc/adc_oneshot.h"
@@ -166,6 +168,19 @@ bool power_is_charging(void)
 
 esp_err_t power_init(void)
 {
+#if defined(BSP_CHG_STAT_GPIO)
+    gpio_config_t chg = {
+        .pin_bit_mask = 1ULL << BSP_CHG_STAT_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    esp_err_t err = gpio_config(&chg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "charge-stat gpio config failed: %s", esp_err_to_name(err));
+    }
+#endif
     ESP_LOGI(TAG, "no ADC battery pin on %s — battery shows '--'", BSP_BOARD_NAME);
     return ESP_OK;
 }
@@ -173,14 +188,18 @@ esp_err_t power_init(void)
 int power_battery_pct(bool *out_charging)
 {
     if (out_charging) {
-        *out_charging = false;
+        *out_charging = power_is_charging();
     }
     return -1;
 }
 
 bool power_is_charging(void)
 {
+#if defined(BSP_CHG_STAT_GPIO)
+    return gpio_get_level(BSP_CHG_STAT_GPIO) == 0;   /* open-drain LOW == charging */
+#else
     return false;
+#endif
 }
 
 #endif
@@ -202,19 +221,16 @@ bool power_woke_from_button(void)
 
 void power_deep_sleep(void)
 {
-    /* Wake on Record or Sync only — NOT Left (GPIO0): it is the boot strapping
-     * pin, and being held low at the wake-reset would drop the chip into ROM
-     * download mode instead of running the app. EXT1 ANY_LOW + RTC pull-ups so
-     * the pins idle high through sleep and only a press (active-low) wakes. */
-    const int pins[] = { BSP_BTN_RIGHT_GPIO, BSP_BTN_MIDDLE_GPIO };
-    uint64_t mask = 0;
-    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-        mask |= 1ULL << pins[i];
-        rtc_gpio_pullup_en((gpio_num_t)pins[i]);
-        rtc_gpio_pulldown_dis((gpio_num_t)pins[i]);
-    }
+    /* Wake on Record only. Sync/Middle is excluded so an accidental hold does
+     * not light the device while it is sleeping on battery. Left/GPIO0 is also
+     * excluded because it is the boot strapping pin; holding it during reset
+     * enters ROM download mode instead of running the app. EXT1 ANY_LOW + RTC
+     * pull-up keeps the pin idle high and wakes only on an active-low press. */
+    const int pin = BSP_BTN_RIGHT_GPIO;
+    const uint64_t mask = 1ULL << pin;
+    rtc_gpio_pullup_en((gpio_num_t)pin);
+    rtc_gpio_pulldown_dis((gpio_num_t)pin);
     esp_sleep_enable_ext1_wakeup(mask, ESP_EXT1_WAKEUP_ANY_LOW);
-    ESP_LOGI(TAG, "entering deep sleep; wake on GPIO%d or GPIO%d",
-             BSP_BTN_RIGHT_GPIO, BSP_BTN_MIDDLE_GPIO);
+    ESP_LOGI(TAG, "entering deep sleep; wake on GPIO%d", pin);
     esp_deep_sleep_start();
 }

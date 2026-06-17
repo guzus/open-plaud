@@ -5,8 +5,9 @@
  * previous run failed to upload (uploads happen on boot if Wi-Fi is up). To cut
  * idle battery draw, audio is initialized only while a clip records, Wi-Fi is
  * stopped after each upload batch, the screen blanks while recording, and the
- * device enters deep sleep after an idle timeout (wakes on Record/Sync — a
- * reboot, not a resume).
+ * device enters deep sleep after an idle timeout (wakes on Record only — a
+ * reboot, not a resume). Sync is deliberately not a battery wake source because
+ * the middle button can be held accidentally in a pocket.
  * Then poll three top-edge buttons forever:
  *
  *   Right  (record) : tap to start recording, tap again to stop. Stop SAVES the
@@ -92,6 +93,13 @@ static void ensure_screen_on(void)
         s_screen_on = true;
         status_display(true);
     }
+}
+
+static bool sync_may_wake_screen(void)
+{
+    /* The board exposes charge-status, not true VBUS. Treat "charging" as the
+     * best available proxy for externally powered. */
+    return power_is_charging();
 }
 
 static void retry_pending_clips(const char *context)
@@ -200,10 +208,12 @@ static record_result_t record_clip(const char *path)
             break;
         }
 
-        /* Screen-off while recording saves the backlight; any button press wakes
-         * it. The panel keeps its frame, so wake is backlight-only — no redraw,
-         * no DMA on this capture task. */
-        if (right || left || middle) {
+        /* Screen-off while recording saves the backlight. Record/Left wake it
+         * because they are actions; Sync only wakes it while charging so an
+         * accidental middle hold on battery stays dark. The panel keeps its
+         * frame, so wake is backlight-only — no redraw, no DMA on this capture
+         * task. */
+        if (right || left || (middle && sync_may_wake_screen())) {
             rec_screen_idle = 0;
             if (!rec_screen_on) {
                 status_backlight(true);
@@ -411,11 +421,17 @@ void app_main(void)
             show_idle(pending);
             last_refresh = last_activity = xTaskGetTickCount();
         } else if (btn_poll_edge(BTN_SYNC)) {
-            ensure_screen_on();
-            do_sync(pending);
-            btn_resync();
-            pending = rec_store_pending_count();
-            last_refresh = last_activity = xTaskGetTickCount();
+            if (!s_screen_on && !sync_may_wake_screen()) {
+                ESP_LOGI(TAG, "sync ignored while screen is off on battery");
+                btn_resync();
+                last_activity = xTaskGetTickCount();
+            } else {
+                ensure_screen_on();
+                do_sync(pending);
+                btn_resync();
+                pending = rec_store_pending_count();
+                last_refresh = last_activity = xTaskGetTickCount();
+            }
         } else if (btn_poll_edge(BTN_POWER)) {
             s_screen_on = !s_screen_on;
             status_display(s_screen_on);
@@ -435,7 +451,7 @@ void app_main(void)
 #if CONFIG_OPEN_PLAUD_IDLE_SLEEP_S > 0
             if (!power_is_charging() &&
                 now - last_activity >= pdMS_TO_TICKS(CONFIG_OPEN_PLAUD_IDLE_SLEEP_S * 1000)) {
-                ESP_LOGI(TAG, "idle %ds - deep sleep (wake on Record/Sync)",
+                ESP_LOGI(TAG, "idle %ds - deep sleep (wake on Record)",
                          CONFIG_OPEN_PLAUD_IDLE_SLEEP_S);
                 status_backlight(false);
                 power_deep_sleep();   /* resets on wake; does not return */

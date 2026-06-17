@@ -86,6 +86,8 @@ device un-reflashable + un-USB-recognizable until a battery power-cycle. Battery
 uses a calibrated 3:1 divider (`power.c`); the **Left** button blanks the screen on
 demand. See [`docs/POWER.md`](../docs/POWER.md) for estimated battery life
 (~3–8 h active) and the deep-sleep caveat.
+When the screen is off on battery, Middle/Sync is ignored instead of turning the
+screen on; while charging, it may wake the screen and sync.
 
 ## Layout
 
@@ -193,8 +195,8 @@ inspect/remove such clips before rebooting if that matters.
 - [x] Power down audio outside recording + stop Wi-Fi after upload (idle draw).
 - [x] Calibrate the battery divider (3:1) so the % reads true (2026-06-16).
 - [x] Flash the 3-button build; confirm button mapping on hardware (2026-06-16).
-- [x] Deep sleep + screen-off-while-recording; wake on Record/Sync (EXT1),
-      verified on hardware (2026-06-16) — but shipped OFF by default (it strands
+- [x] Deep sleep + screen-off-while-recording; wake on Record only (EXT1),
+      initially verified on hardware (2026-06-16) — but shipped OFF by default (it strands
       USB/reflash on this reset-button-less board; see docs/POWER.md).
 - [ ] USJ-restore-on-wake fix (e.g. esp_restart on wake) so deep sleep can be
       re-enabled safely; then measure real sleep current on the cell.
