@@ -14,38 +14,39 @@ struct OpenPlaudApp: App {
 
 struct OpenPlaudRootView: View {
     private enum AppTab: Hashable {
-        case device
-        case sync
+        case connect
+        case upload
     }
 
     @ObservedObject var deviceClient: OpenPlaudDeviceClient
 
-    @State private var selectedTab: AppTab = .device
+    @State private var selectedTab: AppTab = .connect
     @State private var wifiSSID = ""
     @State private var wifiPassword = ""
     @State private var serverURL = ""
     @State private var authToken = ""
     @State private var isSetupExpanded = false
+    @State private var isAdvancedExpanded = false
     @State private var route: OpenPlaudTransferRoute = .wifi
-    @State private var compression: OpenPlaudTransferCompression = .monoWav
+    @State private var compression: OpenPlaudTransferCompression = .imaAdpcm
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            deviceTab
+            connectTab
                 .tabItem {
-                    Label("Device", systemImage: "record.circle")
+                    Label("Connect", systemImage: "dot.radiowaves.left.and.right")
                 }
-                .tag(AppTab.device)
+                .tag(AppTab.connect)
 
-            syncTab
+            uploadTab
                 .tabItem {
-                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Upload", systemImage: "arrow.up.circle")
                 }
-                .tag(AppTab.sync)
+                .tag(AppTab.upload)
         }
     }
 
-    private var deviceTab: some View {
+    private var connectTab: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
@@ -57,13 +58,12 @@ struct OpenPlaudRootView: View {
 
                     deviceStatusCard
                     devicesCard
-                    recentActivityCard
                 }
                 .padding(16)
                 .padding(.bottom, 72)
             }
             .background(OpenPlaudTheme.screenBackground.ignoresSafeArea())
-            .navigationTitle("Open Plaud")
+            .navigationTitle("Connect")
             .openPlaudNavigationTitleMode()
             .toolbar {
                 ToolbarItem {
@@ -79,26 +79,27 @@ struct OpenPlaudRootView: View {
         }
     }
 
-    private var syncTab: some View {
+    private var uploadTab: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     if let status = deviceClient.status {
-                        syncSummaryCard(status)
+                        uploadSummaryCard(status)
                     }
 
                     if let lastError = deviceClient.lastError {
                         ErrorBanner(message: lastError)
                     }
 
-                    transferCard
+                    uploadActionCard
                     setupCard
+                    advancedCard
                 }
                 .padding(16)
                 .padding(.bottom, 72)
             }
             .background(OpenPlaudTheme.screenBackground.ignoresSafeArea())
-            .navigationTitle("Sync")
+            .navigationTitle("Upload")
             .openPlaudNavigationTitleMode()
             .toolbar {
                 ToolbarItem {
@@ -334,98 +335,123 @@ struct OpenPlaudRootView: View {
         }
     }
 
-    private var transferCard: some View {
+    private var uploadActionCard: some View {
         OpenPlaudCard {
             VStack(alignment: .leading, spacing: 16) {
-                SectionHeader("Sync", systemImage: "arrow.triangle.2.circlepath")
+                SectionHeader("Recordings", systemImage: "tray.full")
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("Route", selection: $route) {
-                        ForEach(OpenPlaudTransferRoute.allCases, id: \.self) { route in
-                            Text(route.displayName).tag(route)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    Picker("Compression", selection: $compression) {
-                        ForEach(OpenPlaudTransferCompression.allCases, id: \.self) { compression in
-                            Text(compression.shortLabel).tag(compression)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                if deviceClient.status == nil {
+                    EmptyState(
+                        title: "No device status",
+                        systemImage: "waveform.badge.magnifyingglass",
+                        detail: "Connect to Open Plaud first."
+                    )
                 }
 
                 Button {
-                    deviceClient.setTransferPreference(route: route, compression: compression)
+                    deviceClient.setTransferPreference(route: .wifi, compression: .imaAdpcm)
+                    deviceClient.startWiFiSync()
                 } label: {
-                    Label("Set Transfer", systemImage: "checkmark.circle")
+                    Label("Upload recordings", systemImage: "arrow.up.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!isReady)
+
+                Button(role: .destructive) {
+                    deviceClient.stopSync()
+                } label: {
+                    Label("Stop upload", systemImage: "stop.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .disabled(!isReady)
-
-                HStack(spacing: 10) {
-                    Button {
-                        deviceClient.startWiFiSync()
-                    } label: {
-                        Label("Start", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!isReady)
-
-                    Button(role: .destructive) {
-                        deviceClient.stopSync()
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isReady)
-                }
-
-                Divider()
-
-                HStack(spacing: 10) {
-                    Button {
-                        deviceClient.prepareBluetoothClipTransfer(codec: .imaAdpcm)
-                    } label: {
-                        Label("Prepare BLE", systemImage: "point.3.connected.trianglepath.dotted")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isReady)
-
-                    Button {
-                        deviceClient.readNextClipChunk()
-                    } label: {
-                        Label("Read Chunk", systemImage: "square.and.arrow.down")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!isReady)
-                }
-
-                if let cursor = deviceClient.clipTransferCursor {
-                    DetailRow(
-                        title: "BLE cursor",
-                        value: "\(cursor.codec.rawValue) @ \(cursor.offset)",
-                        systemImage: "location"
-                    )
-                }
-
-                if let chunk = deviceClient.lastClipChunk {
-                    DetailRow(
-                        title: "BLE chunk",
-                        value: "\(chunk.state.label), \(chunk.payloadLength) B, \(chunk.offsetEnd)/\(chunk.totalBytes)",
-                        systemImage: "shippingbox"
-                    )
-                }
             }
         }
     }
 
-    private func syncSummaryCard(_ status: OpenPlaudDeviceStatus) -> some View {
+    private var advancedCard: some View {
+        OpenPlaudCard {
+            DisclosureGroup(isExpanded: $isAdvancedExpanded) {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("Route", selection: $route) {
+                            ForEach(OpenPlaudTransferRoute.allCases, id: \.self) { route in
+                                Text(route.displayName).tag(route)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Picker("Compression", selection: $compression) {
+                            ForEach(OpenPlaudTransferCompression.allCases, id: \.self) { compression in
+                                Text(compression.shortLabel).tag(compression)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    Button {
+                        deviceClient.setTransferPreference(route: route, compression: compression)
+                    } label: {
+                        Label("Set transfer preference", systemImage: "checkmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isReady)
+
+                    Divider()
+
+                    HStack(spacing: 10) {
+                        Button {
+                            deviceClient.prepareBluetoothClipTransfer(codec: .imaAdpcm)
+                        } label: {
+                            Label("Prepare BLE", systemImage: "point.3.connected.trianglepath.dotted")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!isReady)
+
+                        Button {
+                            deviceClient.readNextClipChunk()
+                        } label: {
+                            Label("Read Chunk", systemImage: "square.and.arrow.down")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!isReady)
+                    }
+
+                    if let cursor = deviceClient.clipTransferCursor {
+                        DetailRow(
+                            title: "BLE cursor",
+                            value: "\(cursor.codec.rawValue) @ \(cursor.offset)",
+                            systemImage: "location"
+                        )
+                    }
+
+                    if let chunk = deviceClient.lastClipChunk {
+                        DetailRow(
+                            title: "BLE chunk",
+                            value: "\(chunk.state.label), \(chunk.payloadLength) B, \(chunk.offsetEnd)/\(chunk.totalBytes)",
+                            systemImage: "shippingbox"
+                        )
+                    }
+
+                    if !deviceClient.commandLog.isEmpty {
+                        Divider()
+                        commandLogRows
+                    }
+                }
+                .padding(.top, 12)
+            } label: {
+                SectionHeader("Advanced", systemImage: "wrench.and.screwdriver")
+            }
+            .tint(.primary)
+        }
+    }
+
+    private func uploadSummaryCard(_ status: OpenPlaudDeviceStatus) -> some View {
         OpenPlaudCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
@@ -456,34 +482,24 @@ struct OpenPlaudRootView: View {
         }
     }
 
-    private var recentActivityCard: some View {
-        OpenPlaudCard {
-            VStack(alignment: .leading, spacing: 14) {
-                SectionHeader("Recent", systemImage: "clock.arrow.circlepath")
+    private var commandLogRows: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader("Command log", systemImage: "terminal")
 
-                if deviceClient.commandLog.isEmpty {
-                    EmptyState(
-                        title: "No commands sent",
-                        systemImage: "terminal",
-                        detail: "Command history appears here."
-                    )
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(deviceClient.commandLog.enumerated()), id: \.offset) { index, entry in
-                            HStack(spacing: 10) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                Text(entry)
-                                    .font(.subheadline)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .padding(.vertical, 8)
+            VStack(spacing: 0) {
+                ForEach(Array(deviceClient.commandLog.enumerated()), id: \.offset) { index, entry in
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(entry)
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.vertical, 8)
 
-                            if index < deviceClient.commandLog.count - 1 {
-                                Divider()
-                                    .padding(.leading, 28)
-                            }
-                        }
+                    if index < deviceClient.commandLog.count - 1 {
+                        Divider()
+                            .padding(.leading, 28)
                     }
                 }
             }
