@@ -245,7 +245,7 @@ struct OpenPlaudRootView: View {
         OpenPlaudCard {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    SectionHeader("Nearby", systemImage: "antenna.radiowaves.left.and.right")
+                    SectionHeader("Open Plaud", systemImage: "antenna.radiowaves.left.and.right")
                     Spacer()
                     Text("\(deviceClient.discoveredDevices.count)")
                         .font(.caption.weight(.semibold))
@@ -257,9 +257,9 @@ struct OpenPlaudRootView: View {
 
                 if deviceClient.discoveredDevices.isEmpty {
                     EmptyState(
-                        title: "No devices found",
+                        title: "No Open Plaud found",
                         systemImage: "antenna.radiowaves.left.and.right.slash",
-                        detail: "Tap Scan while the device is awake."
+                        detail: "Tap Scan while Open Plaud is awake."
                     )
                 } else {
                     VStack(spacing: 0) {

@@ -71,7 +71,7 @@ public final class OpenPlaudDeviceClient: NSObject, ObservableObject {
         lastError = nil
         connectionState = .scanning
         centralManager.scanForPeripherals(
-            withServices: nil,
+            withServices: [OpenPlaudBLEProfile.serviceUUID],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
     }
@@ -225,9 +225,7 @@ extension OpenPlaudDeviceClient: CBCentralManagerDelegate {
 
         MainActor.assumeIsolated {
             let name = localName ?? peripheral.name ?? "Open Plaud"
-            guard name.localizedCaseInsensitiveContains(OpenPlaudBLEProfile.advertisedNamePrefix)
-                || hasOpenPlaudService
-            else {
+            guard hasOpenPlaudService else {
                 return
             }
 
