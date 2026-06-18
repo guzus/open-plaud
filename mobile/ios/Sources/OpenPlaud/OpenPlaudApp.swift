@@ -13,16 +13,39 @@ struct OpenPlaudApp: App {
 }
 
 struct OpenPlaudRootView: View {
+    private enum AppTab: Hashable {
+        case device
+        case sync
+    }
+
     @ObservedObject var deviceClient: OpenPlaudDeviceClient
 
+    @State private var selectedTab: AppTab = .device
     @State private var wifiSSID = ""
     @State private var wifiPassword = ""
     @State private var serverURL = ""
     @State private var authToken = ""
+    @State private var isSetupExpanded = false
     @State private var route: OpenPlaudTransferRoute = .wifi
     @State private var compression: OpenPlaudTransferCompression = .monoWav
 
     var body: some View {
+        TabView(selection: $selectedTab) {
+            deviceTab
+                .tabItem {
+                    Label("Device", systemImage: "record.circle")
+                }
+                .tag(AppTab.device)
+
+            syncTab
+                .tabItem {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .tag(AppTab.sync)
+        }
+    }
+
+    private var deviceTab: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 16) {
@@ -34,14 +57,48 @@ struct OpenPlaudRootView: View {
 
                     deviceStatusCard
                     devicesCard
-                    setupCard
-                    transferCard
                     recentActivityCard
                 }
                 .padding(16)
+                .padding(.bottom, 72)
             }
             .background(OpenPlaudTheme.screenBackground.ignoresSafeArea())
             .navigationTitle("Open Plaud")
+            .openPlaudNavigationTitleMode()
+            .toolbar {
+                ToolbarItem {
+                    Button {
+                        deviceClient.requestStatus()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(!isReady)
+                    .accessibilityLabel("Refresh status")
+                }
+            }
+        }
+    }
+
+    private var syncTab: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    if let status = deviceClient.status {
+                        syncSummaryCard(status)
+                    }
+
+                    if let lastError = deviceClient.lastError {
+                        ErrorBanner(message: lastError)
+                    }
+
+                    transferCard
+                    setupCard
+                }
+                .padding(16)
+                .padding(.bottom, 72)
+            }
+            .background(OpenPlaudTheme.screenBackground.ignoresSafeArea())
+            .navigationTitle("Sync")
             .openPlaudNavigationTitleMode()
             .toolbar {
                 ToolbarItem {
@@ -227,49 +284,53 @@ struct OpenPlaudRootView: View {
 
     private var setupCard: some View {
         OpenPlaudCard {
-            VStack(alignment: .leading, spacing: 16) {
-                SectionHeader("Setup", systemImage: "slider.horizontal.3")
+            DisclosureGroup(isExpanded: $isSetupExpanded) {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(spacing: 12) {
+                        TextField("Wi-Fi SSID", text: $wifiSSID)
+                            .openPlaudCredentialInputStyle()
+                            .openPlaudFieldStyle()
+                        SecureField("Wi-Fi password", text: $wifiPassword)
+                            .openPlaudCredentialInputStyle()
+                            .openPlaudFieldStyle()
 
-                VStack(spacing: 12) {
-                    TextField("Wi-Fi SSID", text: $wifiSSID)
-                        .openPlaudCredentialInputStyle()
-                        .openPlaudFieldStyle()
-                    SecureField("Wi-Fi password", text: $wifiPassword)
-                        .openPlaudCredentialInputStyle()
-                        .openPlaudFieldStyle()
-
-                    Button {
-                        deviceClient.configureWiFi(ssid: wifiSSID, password: wifiPassword)
-                    } label: {
-                        Label("Send Wi-Fi", systemImage: "wifi")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!isReady || wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-
-                Divider()
-
-                VStack(spacing: 12) {
-                    TextField("Server URL", text: $serverURL)
-                        .openPlaudURLInputStyle()
-                        .openPlaudFieldStyle()
-                    SecureField("Auth token", text: $authToken)
-                        .openPlaudFieldStyle()
-
-                    Button {
-                        guard let url = URL(string: serverURL) else {
-                            return
+                        Button {
+                            deviceClient.configureWiFi(ssid: wifiSSID, password: wifiPassword)
+                        } label: {
+                            Label("Send Wi-Fi", systemImage: "wifi")
+                                .frame(maxWidth: .infinity)
                         }
-                        deviceClient.configureServer(url: url, authToken: authToken)
-                    } label: {
-                        Label("Send Server", systemImage: "server.rack")
-                            .frame(maxWidth: .infinity)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!isReady || wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!isReady || URL(string: serverURL) == nil)
+
+                    Divider()
+
+                    VStack(spacing: 12) {
+                        TextField("Server URL", text: $serverURL)
+                            .openPlaudURLInputStyle()
+                            .openPlaudFieldStyle()
+                        SecureField("Auth token", text: $authToken)
+                            .openPlaudFieldStyle()
+
+                        Button {
+                            guard let url = URL(string: serverURL) else {
+                                return
+                            }
+                            deviceClient.configureServer(url: url, authToken: authToken)
+                        } label: {
+                            Label("Send Server", systemImage: "server.rack")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!isReady || URL(string: serverURL) == nil)
+                    }
                 }
+                .padding(.top, 12)
+            } label: {
+                SectionHeader("Setup", systemImage: "slider.horizontal.3")
             }
+            .tint(.primary)
         }
     }
 
@@ -359,6 +420,37 @@ struct OpenPlaudRootView: View {
                         value: "\(chunk.state.label), \(chunk.payloadLength) B, \(chunk.offsetEnd)/\(chunk.totalBytes)",
                         systemImage: "shippingbox"
                     )
+                }
+            }
+        }
+    }
+
+    private func syncSummaryCard(_ status: OpenPlaudDeviceStatus) -> some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(status.syncState.tint.opacity(0.14))
+                        Image(systemName: status.syncState.iconName)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(status.syncState.tint)
+                    }
+                    .frame(width: 48, height: 48)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(status.syncState.displayName)
+                            .font(.title3.weight(.semibold))
+                        Text(status.queueSummary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                if let transferPercent = status.transferPercent {
+                    ProgressView(value: Double(transferPercent), total: 100)
                 }
             }
         }
@@ -774,6 +866,34 @@ private extension OpenPlaudSyncState {
             return "Failed"
         }
     }
+
+    var iconName: String {
+        switch self {
+        case .idle:
+            return "pause.circle"
+        case .scanningWiFi:
+            return "wifi"
+        case .syncing:
+            return "arrow.triangle.2.circlepath"
+        case .complete:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .idle:
+            return .secondary
+        case .scanningWiFi, .syncing:
+            return .blue
+        case .complete:
+            return .green
+        case .failed:
+            return .red
+        }
+    }
 }
 
 private extension OpenPlaudDeviceStatus {
@@ -819,6 +939,17 @@ private extension OpenPlaudDeviceStatus {
             return .blue
         }
         return .orange
+    }
+
+    var queueSummary: String {
+        let count = queuedClips ?? 0
+        if count == 0 {
+            return "No clips waiting"
+        }
+        if count == 1 {
+            return "1 clip waiting"
+        }
+        return "\(count) clips waiting"
     }
 }
 
