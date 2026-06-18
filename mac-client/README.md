@@ -146,6 +146,19 @@ swift run OpenPlaudApp
    **auth token** (saved to the Keychain). Use **Test Connection** to confirm.
 3. Click **Sync N clips** (⌘S). Watch each row go `queued → syncing → synced`.
 
+## Install the Mac app
+
+Build and install a signed local app bundle with the Open Plaud icon:
+
+```bash
+./scripts/install-mac-app.sh
+# -> /Applications/Open Plaud.app
+```
+
+The installer builds the release `OpenPlaudApp` executable, wraps it in a
+standard macOS `.app` bundle, adds `Resources/OpenPlaud.icns`, ad-hoc signs the
+bundle, and replaces the installed copy in `/Applications`.
+
 ## Run the CLI (headless / scriptable)
 
 The CLI is driven entirely by flags/env — it never touches the Keychain or
