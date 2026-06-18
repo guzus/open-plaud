@@ -27,6 +27,7 @@ targets:
         CFBundleDisplayName: Open Plaud
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
         LSRequiresIPhoneOS: true
         NSBluetoothAlwaysUsageDescription: Open Plaud uses Bluetooth to discover and configure nearby Open Plaud devices.
         NSMicrophoneUsageDescription: Open Plaud uses microphone access only when recording or transcribing audio you choose.
