@@ -24,15 +24,25 @@ struct OpenPlaudRootView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                bluetoothSection
-                devicesSection
-                statusSection
-                configurationSection
-                commandSection
-                logSection
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    connectionCard
+
+                    if let lastError = deviceClient.lastError {
+                        ErrorBanner(message: lastError)
+                    }
+
+                    deviceStatusCard
+                    devicesCard
+                    setupCard
+                    transferCard
+                    recentActivityCard
+                }
+                .padding(16)
             }
+            .background(OpenPlaudTheme.screenBackground.ignoresSafeArea())
             .navigationTitle("Open Plaud")
+            .openPlaudNavigationTitleMode()
             .toolbar {
                 ToolbarItem {
                     Button {
@@ -47,202 +57,342 @@ struct OpenPlaudRootView: View {
         }
     }
 
-    private var bluetoothSection: some View {
-        Section("Bluetooth") {
-            LabeledContent("State", value: bluetoothStateText)
-            LabeledContent("Connection", value: connectionStateText)
+    private var connectionCard: some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(connectionTint.opacity(0.14))
+                        Image(systemName: connectionIconName)
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(connectionTint)
+                    }
+                    .frame(width: 54, height: 54)
 
-            HStack {
-                Button {
-                    deviceClient.startScanning()
-                } label: {
-                    Label("Scan", systemImage: "dot.radiowaves.left.and.right")
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(connectionStateText)
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text("Bluetooth \(bluetoothStateText.lowercased())")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    StatusPill(title: readyPillTitle, tint: connectionTint)
                 }
-                .disabled(deviceClient.bluetoothState != .poweredOn)
 
-                Spacer()
+                HStack(spacing: 10) {
+                    Button {
+                        deviceClient.startScanning()
+                    } label: {
+                        Label(scanButtonTitle, systemImage: "dot.radiowaves.left.and.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(deviceClient.bluetoothState != .poweredOn)
 
-                Button(role: .destructive) {
-                    deviceClient.disconnect()
-                } label: {
-                    Label("Disconnect", systemImage: "xmark.circle")
+                    Button(role: .destructive) {
+                        deviceClient.disconnect()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .frame(width: 42, height: 42)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isConnected)
+                    .accessibilityLabel("Disconnect")
                 }
-                .disabled(!isConnected)
-            }
-
-            if let lastError = deviceClient.lastError {
-                Text(lastError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
             }
         }
     }
 
-    private var devicesSection: some View {
-        Section("Devices") {
-            if deviceClient.discoveredDevices.isEmpty {
-                ContentUnavailableView(
-                    "No Open Plaud nearby",
-                    systemImage: "antenna.radiowaves.left.and.right.slash"
-                )
-            } else {
-                ForEach(deviceClient.discoveredDevices) { device in
-                    Button {
-                        deviceClient.connect(to: device)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(device.name)
-                                Text("RSSI \(device.rssi)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+    private var deviceStatusCard: some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionHeader("Device", systemImage: "record.circle")
+
+                if let status = deviceClient.status {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(alignment: .top, spacing: 12) {
+                            MetricTile(
+                                title: "Battery",
+                                value: status.batteryDisplay,
+                                systemImage: status.batteryIconName,
+                                tint: status.batteryTint
+                            )
+                            MetricTile(
+                                title: "Queue",
+                                value: status.queueDisplay,
+                                systemImage: "tray.full",
+                                tint: status.queueTint
+                            )
+                        }
+
+                        VStack(spacing: 10) {
+                            DetailRow(title: "Sync", value: status.syncState.displayName, systemImage: "arrow.triangle.2.circlepath")
+                            DetailRow(title: "Wi-Fi", value: status.wifiSSID ?? "Not set", systemImage: "wifi")
+                            if let firmwareVersion = status.firmwareVersion {
+                                DetailRow(title: "Firmware", value: firmwareVersion, systemImage: "cpu")
                             }
-                            Spacer()
-                            Image(systemName: device.isConnectable ? "link" : "lock")
+                            if let activeClip = status.activeClip {
+                                DetailRow(title: "Clip", value: activeClip, systemImage: "waveform")
+                            }
+                            if let preference = status.transferPreference {
+                                DetailRow(
+                                    title: "Transfer",
+                                    value: "\(preference.route.displayName) / \(preference.compression.label)",
+                                    systemImage: "point.3.connected.trianglepath.dotted"
+                                )
+                            }
+                        }
+
+                        if let transferPercent = status.transferPercent {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Transfer")
+                                        .font(.subheadline.weight(.medium))
+                                    Spacer()
+                                    Text("\(transferPercent)%")
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                ProgressView(value: Double(transferPercent), total: 100)
+                            }
+                        }
+
+                        if let message = status.message {
+                            Text(message)
+                                .font(.footnote)
                                 .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(OpenPlaudTheme.subtleFill, in: RoundedRectangle(cornerRadius: 8))
                         }
                     }
-                    .disabled(!device.isConnectable)
+                } else {
+                    EmptyState(
+                        title: "No status yet",
+                        systemImage: "waveform.badge.magnifyingglass",
+                        detail: "Connect to an Open Plaud device, then refresh."
+                    )
                 }
             }
         }
     }
 
-    private var statusSection: some View {
-        Section("Status") {
-            if let status = deviceClient.status {
-                LabeledContent("Sync", value: status.syncState.rawValue.replacingOccurrences(of: "_", with: " "))
-                if let queuedClips = status.queuedClips {
-                    LabeledContent("Queued clips", value: "\(queuedClips)")
+    private var devicesCard: some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    SectionHeader("Nearby", systemImage: "antenna.radiowaves.left.and.right")
+                    Spacer()
+                    Text("\(deviceClient.discoveredDevices.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(OpenPlaudTheme.subtleFill, in: Capsule())
                 }
-                if let batteryPercent = status.batteryPercent {
-                    LabeledContent("Battery", value: "\(batteryPercent)%")
-                }
-                if let firmwareVersion = status.firmwareVersion {
-                    LabeledContent("Firmware", value: firmwareVersion)
-                }
-                if let wifiSSID = status.wifiSSID {
-                    LabeledContent("Wi-Fi", value: wifiSSID)
-                }
-                if let activeClip = status.activeClip {
-                    LabeledContent("Clip", value: activeClip)
-                }
-                if let transferPercent = status.transferPercent {
-                    ProgressView(value: Double(transferPercent), total: 100) {
-                        Text("Transfer")
-                    } currentValueLabel: {
-                        Text("\(transferPercent)%")
+
+                if deviceClient.discoveredDevices.isEmpty {
+                    EmptyState(
+                        title: "No devices found",
+                        systemImage: "antenna.radiowaves.left.and.right.slash",
+                        detail: "Tap Scan while the device is awake."
+                    )
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(deviceClient.discoveredDevices) { device in
+                            Button {
+                                deviceClient.connect(to: device)
+                            } label: {
+                                DeviceRow(device: device)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!device.isConnectable)
+
+                            if device.id != deviceClient.discoveredDevices.last?.id {
+                                Divider()
+                                    .padding(.leading, 48)
+                            }
+                        }
                     }
                 }
-                if let message = status.message {
-                    Text(message)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var setupCard: some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionHeader("Setup", systemImage: "slider.horizontal.3")
+
+                VStack(spacing: 12) {
+                    TextField("Wi-Fi SSID", text: $wifiSSID)
+                        .openPlaudCredentialInputStyle()
+                        .openPlaudFieldStyle()
+                    SecureField("Wi-Fi password", text: $wifiPassword)
+                        .openPlaudCredentialInputStyle()
+                        .openPlaudFieldStyle()
+
+                    Button {
+                        deviceClient.configureWiFi(ssid: wifiSSID, password: wifiPassword)
+                    } label: {
+                        Label("Send Wi-Fi", systemImage: "wifi")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isReady || wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+
+                Divider()
+
+                VStack(spacing: 12) {
+                    TextField("Server URL", text: $serverURL)
+                        .openPlaudURLInputStyle()
+                        .openPlaudFieldStyle()
+                    SecureField("Auth token", text: $authToken)
+                        .openPlaudFieldStyle()
+
+                    Button {
+                        guard let url = URL(string: serverURL) else {
+                            return
+                        }
+                        deviceClient.configureServer(url: url, authToken: authToken)
+                    } label: {
+                        Label("Send Server", systemImage: "server.rack")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isReady || URL(string: serverURL) == nil)
+                }
+            }
+        }
+    }
+
+    private var transferCard: some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionHeader("Sync", systemImage: "arrow.triangle.2.circlepath")
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Route", selection: $route) {
+                        ForEach(OpenPlaudTransferRoute.allCases, id: \.self) { route in
+                            Text(route.displayName).tag(route)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Compression", selection: $compression) {
+                        ForEach(OpenPlaudTransferCompression.allCases, id: \.self) { compression in
+                            Text(compression.shortLabel).tag(compression)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Button {
+                    deviceClient.setTransferPreference(route: route, compression: compression)
+                } label: {
+                    Label("Set Transfer", systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!isReady)
+
+                HStack(spacing: 10) {
+                    Button {
+                        deviceClient.startWiFiSync()
+                    } label: {
+                        Label("Start", systemImage: "play.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isReady)
+
+                    Button(role: .destructive) {
+                        deviceClient.stopSync()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isReady)
+                }
+
+                Divider()
+
+                HStack(spacing: 10) {
+                    Button {
+                        deviceClient.prepareBluetoothClipTransfer(codec: .imaAdpcm)
+                    } label: {
+                        Label("Prepare BLE", systemImage: "point.3.connected.trianglepath.dotted")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isReady)
+
+                    Button {
+                        deviceClient.readNextClipChunk()
+                    } label: {
+                        Label("Read Chunk", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isReady)
+                }
+
                 if let cursor = deviceClient.clipTransferCursor {
-                    LabeledContent(
-                        "BLE cursor",
-                        value: "\(cursor.codec.rawValue) @ \(cursor.offset)"
+                    DetailRow(
+                        title: "BLE cursor",
+                        value: "\(cursor.codec.rawValue) @ \(cursor.offset)",
+                        systemImage: "location"
                     )
                 }
+
                 if let chunk = deviceClient.lastClipChunk {
-                    LabeledContent(
-                        "BLE chunk",
-                        value: "\(chunk.state.label), \(chunk.payloadLength) B, \(chunk.offsetEnd)/\(chunk.totalBytes)"
+                    DetailRow(
+                        title: "BLE chunk",
+                        value: "\(chunk.state.label), \(chunk.payloadLength) B, \(chunk.offsetEnd)/\(chunk.totalBytes)",
+                        systemImage: "shippingbox"
                     )
                 }
-            } else {
-                ContentUnavailableView("No status yet", systemImage: "waveform.badge.magnifyingglass")
             }
         }
     }
 
-    private var configurationSection: some View {
-        Section("Configuration") {
-            TextField("Wi-Fi SSID", text: $wifiSSID)
-                .openPlaudCredentialInputStyle()
-            SecureField("Wi-Fi password", text: $wifiPassword)
-            Button {
-                deviceClient.configureWiFi(ssid: wifiSSID, password: wifiPassword)
-            } label: {
-                Label("Send Wi-Fi", systemImage: "wifi")
-            }
-            .disabled(!isReady || wifiSSID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    private var recentActivityCard: some View {
+        OpenPlaudCard {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionHeader("Recent", systemImage: "clock.arrow.circlepath")
 
-            TextField("Server URL", text: $serverURL)
-                .openPlaudURLInputStyle()
-            SecureField("Auth token", text: $authToken)
-            Button {
-                guard let url = URL(string: serverURL) else {
-                    return
-                }
-                deviceClient.configureServer(url: url, authToken: authToken)
-            } label: {
-                Label("Send Server", systemImage: "server.rack")
-            }
-            .disabled(!isReady || URL(string: serverURL) == nil)
+                if deviceClient.commandLog.isEmpty {
+                    EmptyState(
+                        title: "No commands sent",
+                        systemImage: "terminal",
+                        detail: "Command history appears here."
+                    )
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(deviceClient.commandLog.enumerated()), id: \.offset) { index, entry in
+                            HStack(spacing: 10) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text(entry)
+                                    .font(.subheadline)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.vertical, 8)
 
-            Picker("Route", selection: $route) {
-                ForEach(OpenPlaudTransferRoute.allCases, id: \.self) { route in
-                    Text(route.rawValue.capitalized).tag(route)
-                }
-            }
-
-            Picker("Compression", selection: $compression) {
-                ForEach(OpenPlaudTransferCompression.allCases, id: \.self) { compression in
-                    Text(compression.label).tag(compression)
-                }
-            }
-
-            Button {
-                deviceClient.setTransferPreference(route: route, compression: compression)
-            } label: {
-                Label("Set Transfer", systemImage: "slider.horizontal.3")
-            }
-            .disabled(!isReady)
-        }
-    }
-
-    private var commandSection: some View {
-        Section("Commands") {
-            Button {
-                deviceClient.startWiFiSync()
-            } label: {
-                Label("Start Sync", systemImage: "arrow.triangle.2.circlepath")
-            }
-            .disabled(!isReady)
-
-            Button(role: .destructive) {
-                deviceClient.stopSync()
-            } label: {
-                Label("Stop Sync", systemImage: "stop.circle")
-            }
-            .disabled(!isReady)
-
-            Button {
-                deviceClient.prepareBluetoothClipTransfer(codec: .imaAdpcm)
-            } label: {
-                Label("Prepare BLE Transfer", systemImage: "point.3.connected.trianglepath.dotted")
-            }
-            .disabled(!isReady)
-
-            Button {
-                deviceClient.readNextClipChunk()
-            } label: {
-                Label("Read BLE Chunk", systemImage: "square.and.arrow.down")
-            }
-            .disabled(!isReady)
-        }
-    }
-
-    private var logSection: some View {
-        Section("Recent Commands") {
-            if deviceClient.commandLog.isEmpty {
-                Text("No commands sent")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(deviceClient.commandLog, id: \.self) { entry in
-                    Text(entry)
+                            if index < deviceClient.commandLog.count - 1 {
+                                Divider()
+                                    .padding(.leading, 28)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -263,6 +413,17 @@ struct OpenPlaudRootView: View {
             return true
         }
         return false
+    }
+
+    private var readyPillTitle: String {
+        isReady ? "Ready" : "Offline"
+    }
+
+    private var scanButtonTitle: String {
+        if case .scanning = deviceClient.connectionState {
+            return "Scanning"
+        }
+        return "Scan"
     }
 
     private var bluetoothStateText: String {
@@ -291,10 +452,262 @@ struct OpenPlaudRootView: View {
         case .discovering:
             return "Discovering"
         case .ready:
-            return "Ready"
+            return "Connected"
         case .failed(let message):
             return "Failed: \(message)"
         }
+    }
+
+    private var connectionIconName: String {
+        switch deviceClient.connectionState {
+        case .ready:
+            return "checkmark.circle.fill"
+        case .scanning, .connecting, .discovering:
+            return "dot.radiowaves.left.and.right"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        case .disconnected:
+            return "wave.3.right"
+        }
+    }
+
+    private var connectionTint: Color {
+        switch deviceClient.connectionState {
+        case .ready:
+            return .green
+        case .scanning, .connecting, .discovering:
+            return .blue
+        case .failed:
+            return .red
+        case .disconnected:
+            return .secondary
+        }
+    }
+}
+
+private struct OpenPlaudCard<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(OpenPlaudTheme.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(OpenPlaudTheme.cardBorder)
+            }
+    }
+}
+
+private struct SectionHeader: View {
+    let title: String
+    let systemImage: String
+
+    init(_ title: String, systemImage: String) {
+        self.title = title
+        self.systemImage = systemImage
+    }
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.headline)
+            .foregroundStyle(.primary)
+    }
+}
+
+private struct StatusPill: View {
+    let title: String
+    let tint: Color
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12), in: Capsule())
+    }
+}
+
+private struct MetricTile: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: systemImage)
+                    .foregroundStyle(tint)
+                Spacer()
+            }
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct DetailRow: View {
+    let title: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+private struct DeviceRow: View {
+    let device: OpenPlaudDiscoveredDevice
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(device.isConnectable ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.10))
+                Image(systemName: device.isConnectable ? "link" : "lock")
+                    .foregroundStyle(device.isConnectable ? .blue : .secondary)
+            }
+            .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(device.name)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(device.isConnectable ? .primary : .secondary)
+                Text("RSSI \(device.rssi)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 10)
+    }
+}
+
+private struct EmptyState: View {
+    let title: String
+    let systemImage: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(detail)
+                .font(.footnote)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 16)
+    }
+}
+
+private struct ErrorBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.red.opacity(0.18))
+        }
+    }
+}
+
+private enum OpenPlaudTheme {
+    static var screenBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemGroupedBackground)
+        #elseif os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(.systemBackground)
+        #endif
+    }
+
+    static var cardBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .secondarySystemGroupedBackground)
+        #elseif os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color(.secondarySystemBackground)
+        #endif
+    }
+
+    static var subtleFill: Color {
+        #if os(iOS)
+        Color(uiColor: .tertiarySystemFill)
+        #elseif os(macOS)
+        Color(nsColor: .separatorColor).opacity(0.20)
+        #else
+        Color.gray.opacity(0.12)
+        #endif
+    }
+
+    static var fieldBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemBackground)
+        #elseif os(macOS)
+        Color(nsColor: .textBackgroundColor)
+        #else
+        Color.white
+        #endif
+    }
+
+    static var cardBorder: Color {
+        #if os(iOS)
+        Color(uiColor: .separator).opacity(0.18)
+        #elseif os(macOS)
+        Color(nsColor: .separatorColor).opacity(0.24)
+        #else
+        Color.gray.opacity(0.20)
+        #endif
     }
 }
 
@@ -311,6 +724,17 @@ private extension OpenPlaudClipChunk.State {
     }
 }
 
+private extension OpenPlaudTransferRoute {
+    var displayName: String {
+        switch self {
+        case .wifi:
+            return "Wi-Fi"
+        case .bluetooth:
+            return "Bluetooth"
+        }
+    }
+}
+
 private extension OpenPlaudTransferCompression {
     var label: String {
         switch self {
@@ -321,6 +745,80 @@ private extension OpenPlaudTransferCompression {
         case .opus:
             return "Opus"
         }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .monoWav:
+            return "WAV"
+        case .imaAdpcm:
+            return "ADPCM"
+        case .opus:
+            return "Opus"
+        }
+    }
+}
+
+private extension OpenPlaudSyncState {
+    var displayName: String {
+        switch self {
+        case .idle:
+            return "Idle"
+        case .scanningWiFi:
+            return "Scanning Wi-Fi"
+        case .syncing:
+            return "Syncing"
+        case .complete:
+            return "Complete"
+        case .failed:
+            return "Failed"
+        }
+    }
+}
+
+private extension OpenPlaudDeviceStatus {
+    var batteryDisplay: String {
+        guard let batteryPercent else {
+            return "--"
+        }
+        return "\(batteryPercent)%"
+    }
+
+    var batteryIconName: String {
+        if isCharging == true {
+            return "battery.100.bolt"
+        }
+        guard let batteryPercent else {
+            return "battery.0percent"
+        }
+        if batteryPercent >= 75 {
+            return "battery.100percent"
+        }
+        if batteryPercent >= 35 {
+            return "battery.50percent"
+        }
+        return "battery.25percent"
+    }
+
+    var batteryTint: Color {
+        if isCharging == true {
+            return .green
+        }
+        guard let batteryPercent else {
+            return .secondary
+        }
+        return batteryPercent <= 20 ? .red : .green
+    }
+
+    var queueDisplay: String {
+        "\(queuedClips ?? 0)"
+    }
+
+    var queueTint: Color {
+        guard let queuedClips, queuedClips > 0 else {
+            return .blue
+        }
+        return .orange
     }
 }
 
@@ -343,6 +841,25 @@ private extension View {
             .keyboardType(.URL)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+        #else
+        self
+        #endif
+    }
+
+    func openPlaudFieldStyle() -> some View {
+        padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(OpenPlaudTheme.fieldBackground, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(OpenPlaudTheme.cardBorder)
+            }
+    }
+
+    @ViewBuilder
+    func openPlaudNavigationTitleMode() -> some View {
+        #if os(iOS)
+        self.navigationBarTitleDisplayMode(.large)
         #else
         self
         #endif
