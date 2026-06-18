@@ -28,7 +28,7 @@ struct OpenPlaudRootView: View {
     @State private var isSetupExpanded = false
     @State private var isAdvancedExpanded = false
     @State private var route: OpenPlaudTransferRoute = .wifi
-    @State private var compression: OpenPlaudTransferCompression = .imaAdpcm
+    @State private var compression: OpenPlaudTransferCompression = .opus
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -349,7 +349,7 @@ struct OpenPlaudRootView: View {
                 }
 
                 Button {
-                    deviceClient.setTransferPreference(route: .wifi, compression: .imaAdpcm)
+                    deviceClient.setTransferPreference(route: .wifi, compression: .opus)
                     deviceClient.startWiFiSync()
                 } label: {
                     Label("Upload recordings", systemImage: "arrow.up.circle.fill")
