@@ -36,6 +36,10 @@ typedef struct {
 
 esp_err_t status_init(void);
 
+/* One-shot LCD boot animation. `quick` keeps deep-sleep button wakes responsive.
+ * On non-LCD boards this is a no-op. */
+void status_startup_animation(bool quick);
+
 /* Full-screen redraw for a state transition. status_show() hides all the
  * dynamic fields; status_update() shows the ones you populate. */
 void status_show(open_plaud_status_t status);

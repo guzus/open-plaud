@@ -435,7 +435,9 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "open-plaud recorder boot");
     power_init();   /* assert BAT_EN before any slow boot work so battery power latches */
+    const bool from_sleep = power_woke_from_button();
     if (status_init() == ESP_OK) {
+        status_startup_animation(from_sleep);
         status_show(OPEN_PLAUD_STATUS_BOOT);
     }
 
@@ -454,8 +456,6 @@ void app_main(void)
     /* A deep-sleep wake is a full reboot. When we woke from a button, skip the
      * heavy boot work (Wi-Fi retry) and never autoformat the SD, so a wake is
      * fast and can't wipe a card on a transient mount glitch. */
-    const bool from_sleep = power_woke_from_button();
-
     if (sdcard_mount(!from_sleep) != ESP_OK) {
         ESP_LOGE(TAG, "no SD card - halting");
         status_show(OPEN_PLAUD_STATUS_ERROR);

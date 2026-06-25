@@ -34,7 +34,8 @@ targets:
         NSSpeechRecognitionUsageDescription: Open Plaud uses on-device speech recognition to transcribe recordings.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UISupportedInterfaceOrientations~ipad:

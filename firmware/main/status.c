@@ -16,6 +16,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #endif
 #include "esp_log.h"
 #include "power.h"
@@ -282,6 +283,119 @@ static void lcd_draw_text_centered(int y, const char *text, int scale, uint16_t 
 {
     const int x = (BSP_LCD_H_RES - text_width_px(text, scale)) / 2;
     lcd_draw_text(x, y, text, scale, fg, bg);
+}
+
+static void lcd_draw_rect_outline(int x, int y, int w, int h, int thickness, uint16_t color)
+{
+    if (thickness <= 0) {
+        thickness = 1;
+    }
+    lcd_fill_rect(x, y, w, thickness, color);
+    lcd_fill_rect(x, y + h - thickness, w, thickness, color);
+    lcd_fill_rect(x, y, thickness, h, color);
+    lcd_fill_rect(x + w - thickness, y, thickness, h, color);
+}
+
+static void draw_startup_grid(int frame)
+{
+    lcd_fill_rect(0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES, UI_COLOR_BG);
+
+    const int spacing = 24;
+    const int offset = (frame * 5) % spacing;
+    for (int x = -spacing + offset; x < BSP_LCD_H_RES; x += spacing) {
+        lcd_fill_rect(x, 0, 1, BSP_LCD_V_RES, UI_COLOR_HEADER);
+    }
+    for (int y = -spacing + offset / 2; y < BSP_LCD_V_RES; y += spacing) {
+        lcd_fill_rect(0, y, BSP_LCD_H_RES, 1, UI_COLOR_HEADER);
+    }
+}
+
+static uint16_t startup_step_color(int index)
+{
+    switch (index) {
+    case 0: return UI_COLOR_DONE;
+    case 1: return UI_COLOR_READY;
+    case 2: return UI_COLOR_SYNCING;
+    default: return UI_COLOR_ERROR;
+    }
+}
+
+static void draw_startup_steps(int active_step)
+{
+    static const char *labels[] = { "PAIR", "REC", "SYNC", "AI" };
+    const int count = (int)(sizeof(labels) / sizeof(labels[0]));
+    const int gap = BSP_LCD_H_RES / count;
+
+    for (int i = 0; i < count; i++) {
+        const int cx = gap * i + gap / 2;
+        const uint16_t color = startup_step_color(i);
+        const uint16_t dot = i <= active_step ? color : UI_COLOR_DIM;
+        const uint16_t text = i <= active_step ? UI_COLOR_TEXT : UI_COLOR_MUTED;
+
+        lcd_fill_rect(cx - 8, 194, 16, 16, dot);
+        if (i == active_step) {
+            lcd_draw_rect_outline(cx - 12, 190, 24, 24, 1, color);
+        }
+        lcd_draw_text(cx - text_width_px(labels[i], 1) / 2, 218, labels[i], 1, text, UI_COLOR_BG);
+    }
+}
+
+static void draw_startup_device(int frame)
+{
+    static const uint8_t bars[][9] = {
+        { 16, 22, 30, 38, 44, 36, 26, 20, 28 },
+        { 28, 18, 24, 34, 46, 42, 34, 22, 18 },
+        { 18, 30, 42, 34, 24, 20, 28, 38, 44 },
+        { 22, 36, 30, 24, 18, 28, 40, 46, 34 },
+    };
+    static const uint16_t bar_colors[] = {
+        UI_COLOR_READY, UI_COLOR_READY, UI_COLOR_DONE,
+        UI_COLOR_BOOT, UI_COLOR_BOOT, UI_COLOR_BOOT,
+        UI_COLOR_OFFLINE, UI_COLOR_OFFLINE, UI_COLOR_OFFLINE,
+    };
+    const int pattern = frame % (int)(sizeof(bars) / sizeof(bars[0]));
+    const int card_x = 82;
+    const int card_y = 42;
+    const int card_w = 76;
+    const int card_h = 106;
+
+    lcd_fill_rect(card_x, card_y, card_w, card_h, UI_COLOR_CARD);
+    lcd_draw_rect_outline(card_x, card_y, card_w, card_h, 1, UI_COLOR_MUTED);
+
+    lcd_fill_rect(card_x + 19, card_y + 16, 8, 8, UI_COLOR_READY);
+    lcd_draw_text(card_x + 34, card_y + 11, "REC", 2, UI_COLOR_TEXT, UI_COLOR_CARD);
+
+    const int scan_y = card_y + 39 + ((frame * 9) % 52);
+    lcd_fill_rect(card_x + 10, scan_y, card_w - 20, 2, UI_COLOR_DONE);
+
+    const int base_y = card_y + 74;
+    for (int i = 0; i < 9; i++) {
+        const int h = bars[pattern][i];
+        const int x = card_x + 14 + i * 6;
+        lcd_fill_rect(x, base_y - h / 2, 4, h, bar_colors[i]);
+    }
+
+    lcd_fill_rect(card_x + 36, card_y + 88, 4, 22, UI_COLOR_MUTED);
+    lcd_fill_rect(card_x + 27, card_y + 96, 8, 2, UI_COLOR_MUTED);
+    lcd_fill_rect(card_x + 41, card_y + 96, 8, 2, UI_COLOR_MUTED);
+    lcd_fill_rect(card_x + 24, card_y + 91, 2, 12, UI_COLOR_MUTED);
+    lcd_fill_rect(card_x + 50, card_y + 91, 2, 12, UI_COLOR_MUTED);
+}
+
+static void draw_startup_frame(int frame, int active_step)
+{
+    draw_startup_grid(frame);
+
+    const int pulse = frame * 4;
+    lcd_draw_rect_outline(42 - pulse, 28 - pulse, 156 + pulse * 2, 134 + pulse * 2, 1, UI_COLOR_DONE);
+    lcd_draw_rect_outline(56 - pulse / 2, 38 - pulse / 2, 128 + pulse, 116 + pulse, 1, UI_COLOR_OFFLINE);
+    lcd_draw_rect_outline(70, 50, 100, 92, 2, UI_COLOR_BOOT);
+
+    draw_startup_device(frame);
+
+    lcd_draw_text_centered(154, "OPEN PLAUD", 4, UI_COLOR_TEXT, UI_COLOR_BG);
+    lcd_draw_text_centered(184, "PRIVATE VOICE", 2, UI_COLOR_MUTED, UI_COLOR_BG);
+    draw_startup_steps(active_step);
 }
 
 /* ---- button hint row -------------------------------------------------------
@@ -639,6 +753,24 @@ esp_err_t status_init(void)
     return ESP_OK;
 #else
     return ESP_OK;
+#endif
+}
+
+void status_startup_animation(bool quick)
+{
+#if BSP_HAS_LCD
+    if (!s_lcd_ready || s_panel == NULL || !s_display_on) {
+        return;
+    }
+
+    const int frames = quick ? 3 : 7;
+    for (int frame = 0; frame < frames; frame++) {
+        const int active_step = (frame * 4) / frames;
+        draw_startup_frame(frame, active_step > 3 ? 3 : active_step);
+        vTaskDelay(pdMS_TO_TICKS(quick ? 45 : 90));
+    }
+#else
+    (void)quick;
 #endif
 }
 
