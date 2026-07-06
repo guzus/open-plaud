@@ -28,6 +28,8 @@
                           v
                   [Transcript + Summary persisted]
                           |
+                          +-- optional Hooker dispatch -> POST /publish/{topic}
+                          |
                           v
                   GET /v1/recordings/{id}   client fetches text, speakers, summary
 ```
@@ -82,6 +84,7 @@ future optional backend.
 - `mobile/ios` — SwiftPM package for iOS on-device transcription
 - `server/open_plaud/diarization` — provider protocol + `none` / `pyannote` / `whisperx`
 - `server/open_plaud/summarization` — LLM provider protocol + `none` / `claude` / `ollama`
+- `server/open_plaud/hooker.py` — optional Hooker topic dispatch for voice-prompt vibecoding
 - `server/open_plaud/store.py` — SQLite persistence; audio blobs on local FS
 - `firmware/` — ESP-IDF project for the recorder
 - `hardware/` — BOM, case, wiring
