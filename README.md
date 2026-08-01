@@ -90,6 +90,12 @@ curl -F "file=@rec_0001.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
 # the pipeline runs in the background; poll GET /v1/recordings/{id} for the result
 ```
 
+`POST /v1/recordings` accepts ordinary audio uploads, Ogg Opus (`.opus`,
+`audio/ogg`), and the Open Plaud ADPCM container (`.opadpcm`,
+`application/vnd.openplaud.adpcm`) — the two compressed formats the firmware
+actually sends. ADPCM is decoded to 16-bit PCM WAV at ingest so every
+transcription provider sees plain WAV; Opus is passed through untouched.
+
 By default the pipeline is a no-op (stores audio, empty transcript) so it runs
 with no API keys. To actually transcribe + summarize, set the keys in `.env` and
 select the cloud providers:

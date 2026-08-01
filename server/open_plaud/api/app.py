@@ -15,6 +15,7 @@ needs an API key, so import is always safe and tests stay offline.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -31,18 +32,47 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field
 
+from open_plaud.audio_ingest import (
+    OPADPCM_MEDIA_TYPE,
+    OPADPCM_SUFFIX,
+    OpenPlaudADPCMError,
+    decode_opadpcm_file,
+    looks_like_opadpcm,
+)
 from open_plaud.config import Config
 from open_plaud.pipeline.orchestrator import Pipeline
 from open_plaud.store import RecordingStore
 from open_plaud.types import AudioRef, JobStatus, Recording, Summary
 
-_AUDIO_SUFFIXES = {".wav", ".flac", ".m4a", ".mp3"}
-_AUDIO_MEDIA_TYPES = {"audio/wav", "audio/x-wav", "audio/flac", "audio/mpeg", "audio/mp4"}
+# The device does not only send PCM WAV: with the shipped firmware defaults it
+# uploads Ogg Opus, and with Opus off it uploads the Open Plaud ADPCM container
+# (see docs/ARCHITECTURE.md, "Capture, storage, and transfer formats"). Both must
+# be accepted here or the recorder cannot sync at all.
+#
+# These two sets are deliberately not the same set. _AUDIO_* is what we are
+# willing to *serve back*; _UPLOAD_* additionally admits the ADPCM transfer
+# container, which only ever exists between the socket and the decoder — it is
+# unwrapped to PCM WAV at ingest and never stored or served as-is.
+_AUDIO_SUFFIXES = {".wav", ".flac", ".m4a", ".mp3", ".ogg", ".opus"}
+_AUDIO_MEDIA_TYPES = {
+    "audio/wav",
+    "audio/x-wav",
+    "audio/flac",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/ogg",
+    "application/ogg",
+    "audio/opus",
+}
+_UPLOAD_SUFFIXES = _AUDIO_SUFFIXES | {OPADPCM_SUFFIX}
+_UPLOAD_MEDIA_TYPES = _AUDIO_MEDIA_TYPES | {OPADPCM_MEDIA_TYPE}
 _SUFFIX_MEDIA_TYPES = {
     ".wav": "audio/wav",
     ".flac": "audio/flac",
     ".m4a": "audio/mp4",
     ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
 }
 
 
@@ -103,12 +133,12 @@ def _storage_dir() -> Path:
 
 def _safe_suffix(filename: str | None) -> str:
     suffix = Path(filename or "").suffix.lower()
-    return suffix if suffix in _AUDIO_SUFFIXES else ".wav"
+    return suffix if suffix in _UPLOAD_SUFFIXES else ".wav"
 
 
 def _is_supported_audio_upload(filename: str | None, content_type: str | None) -> bool:
     suffix = Path(filename or "").suffix.lower()
-    return suffix in _AUDIO_SUFFIXES or content_type in _AUDIO_MEDIA_TYPES
+    return suffix in _UPLOAD_SUFFIXES or content_type in _UPLOAD_MEDIA_TYPES
 
 
 def _audio_media_type(rec: Recording) -> str:
@@ -131,6 +161,32 @@ def _audio_duration_seconds(path: Path) -> float | None:
             return wav.getnframes() / frame_rate
     except (EOFError, wave.Error, OSError):
         return None
+
+
+def _unwrap_opadpcm(destination: Path, filename: str) -> tuple[Path, str, str]:
+    """Replace an Open Plaud ADPCM upload with canonical PCM WAV, on disk.
+
+    Returns the (path, filename, content_type) to persist. Decoding happens once,
+    here, so no provider ever meets the transfer container — `whisper_cpp` in
+    particular reads 16-bit PCM WAV and nothing else. Opus is deliberately NOT
+    touched: it is a real container that ffmpeg-backed providers and the OpenAI
+    API already accept, and transcoding it would only throw quality away.
+
+    The decode writes to a temp file and renames, because the upload may already
+    be sitting at the `.wav` path we are about to produce (a client is free to
+    send the ADPCM content type under a `.wav` name) and decoding a file onto
+    itself would truncate the source.
+    """
+    scratch = destination.with_name(f"{destination.stem}.pcm.tmp")
+    final = destination.with_suffix(".wav")
+    try:
+        decode_opadpcm_file(destination, scratch, max_output_bytes=config.upload_max_bytes)
+    except BaseException:
+        scratch.unlink(missing_ok=True)
+        raise
+    destination.unlink(missing_ok=True)
+    scratch.replace(final)
+    return final, f"{Path(filename).stem}.wav", "audio/wav"
 
 
 def _recording_duration_seconds(rec: Recording) -> float | None:
@@ -250,12 +306,32 @@ async def create_recording(
         destination.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail="uploaded file is empty")
 
+    # Sniff the magic rather than trusting the name: the device sets both the
+    # .opadpcm suffix and the vendor content type, but only the bytes decide.
+    content_type = file.content_type
+    if looks_like_opadpcm(destination):
+        try:
+            destination, filename, content_type = await asyncio.to_thread(
+                _unwrap_opadpcm, destination, filename
+            )
+        except (OpenPlaudADPCMError, OSError) as exc:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400, detail=f"invalid Open Plaud ADPCM upload: {exc}"
+            ) from exc
+        size = destination.stat().st_size
+    elif Path(filename).suffix.lower() == OPADPCM_SUFFIX:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400, detail="upload is not an Open Plaud ADPCM container"
+        )
+
     recording = Recording(
         id=recording_id,
         audio=AudioRef(
             path=destination,
             filename=filename,
-            content_type=file.content_type,
+            content_type=content_type,
             size_bytes=size,
             duration_seconds=_audio_duration_seconds(destination),
         ),

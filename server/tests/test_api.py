@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import struct
 import wave
 from collections.abc import Iterator
 from pathlib import Path
@@ -309,3 +310,101 @@ def test_reprocess_reruns_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     got = client.get(f"/v1/recordings/{rid}").json()
     assert got["status"] == "done"
     assert got["summary"]["summary"] == "A concise summary."
+
+
+def _opadpcm_bytes(*, samples: int = 16000, sample_rate: int = 16000) -> bytes:
+    """Smallest valid Open Plaud ADPCM container: silence, one channel.
+
+    All-zero nibbles decode to a flat zero signal (step 7 >> 3 == 0), which is
+    all this needs — bit-exactness against the firmware encoder is covered in
+    tests/test_audio_ingest.py.
+    """
+    header = b"OPADPCM1" + struct.pack("<IHI", sample_rate, 1, samples)
+    header += struct.pack("<hBB", 0, 0, 0)  # predictor, step index, reserved
+    return header + bytes(samples // 2)
+
+
+def test_create_recording_decodes_open_plaud_adpcm(tmp_path: Path) -> None:
+    # The firmware uploads this container whenever Opus is off but
+    # OPEN_PLAUD_COMPRESS_TRANSFERS is on. It must land as PCM WAV, because
+    # whisper_cpp reads nothing else.
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/recordings",
+        files={
+            "file": (
+                "rec_0007.opadpcm",
+                _opadpcm_bytes(),
+                "application/vnd.openplaud.adpcm",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "rec_0007.wav"
+    assert body["size_bytes"] == 44 + 16000 * 2
+    assert body["duration_seconds"] == 1.0
+
+    stored = list((tmp_path / "audio").glob("*"))
+    assert [path.suffix for path in stored] == [".wav"]
+    with wave.open(str(stored[0]), "rb") as wav:
+        assert wav.getnchannels() == 1
+        assert wav.getframerate() == 16000
+        assert wav.getnframes() == 16000
+
+
+def test_create_recording_rejects_adpcm_suffix_without_container(tmp_path: Path) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/recordings",
+        files={"file": ("rec_0008.opadpcm", b"not a container", "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "upload is not an Open Plaud ADPCM container"}
+    assert not list((tmp_path / "audio").glob("*"))
+
+
+def test_create_recording_rejects_corrupt_adpcm_container(tmp_path: Path) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/recordings",
+        files={
+            "file": (
+                "rec_0009.opadpcm",
+                _opadpcm_bytes()[:-500],  # truncated mid-payload
+                "application/vnd.openplaud.adpcm",
+            )
+        },
+    )
+
+    assert response.status_code == 400
+    assert "invalid Open Plaud ADPCM upload" in response.json()["detail"]
+    assert not list((tmp_path / "audio").glob("*"))
+
+
+def test_create_recording_accepts_ogg_opus(tmp_path: Path) -> None:
+    # Regression guard for the shipped firmware default (OPEN_PLAUD_OPUS_TRANSFERS
+    # = y): before this was accepted, every sync from a default-built device was
+    # rejected with 415 by this server.
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/recordings",
+        files={"file": ("rec_0010.opus", b"OggS\x00\x02fake-opus", "audio/ogg")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["filename"] == "rec_0010.opus"
+
+    stored = list((tmp_path / "audio").glob("*"))
+    assert [path.suffix for path in stored] == [".opus"]
+
+    download = client.get(f"/v1/recordings/{body['id']}/audio")
+    assert download.status_code == 200
+    assert download.headers["content-type"] == "audio/ogg"
