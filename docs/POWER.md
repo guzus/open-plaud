@@ -1,11 +1,40 @@
 # Power & battery life
 
-> **These are engineering ESTIMATES, not measurements.** No current was measured
-> on the board yet, and Waveshare does not publish a current-draw spec or the
-> bundled cell's capacity. The numbers below come from the ESP32-S3 datasheet
+> # ⚠ EVERY NUMBER IN THIS FILE IS AN UNMEASURED ESTIMATE
+>
+> **No current has ever been measured on this board.** Not once. Every mA, every
+> hour, and every battery-life row below is derived from the ESP32-S3 datasheet
 > plus typical figures for the peripherals (ST7789 backlight, ES7210, microSD,
-> Wi-Fi). Treat them as the right *order of magnitude* and a planning tool, not a
-> guarantee. See "Make this real" at the bottom to replace them with measurements.
+> Wi-Fi) — Waveshare publishes neither a current-draw spec nor the bundled cell's
+> capacity. Treat these as the right *order of magnitude* and nothing more.
+>
+> **This matters beyond this document.** Endurance is the gap between this
+> project and the devices it is measured against (Plaud: 30 h recording, 60-day
+> standby). Every power-motivated engineering decision — sleep policy, screen
+> blanking, capture format, transfer codec, sync cadence — is currently being
+> argued from these guesses. Some of them are certainly wrong, and we cannot say
+> which.
+>
+> ## The single highest-value next work session
+>
+> Put a multimeter in series with the cell (or a USB power meter inline) and
+> record steady-state current in exactly these four states:
+>
+> | # | State | How to reproduce | Estimate to replace |
+> |---|---|---|---|
+> | 1 | **Ready, screen on** | Boot, idle at the ready screen | ~50 mA |
+> | 2 | **Ready, screen off** | Idle, then tap **Left/Power** to blank the backlight | ~30 mA |
+> | 3 | **Recording** | Tap **Right/Record**, let it run past the screen-blank timeout | ~85 mA |
+> | 4 | **Wi-Fi sync** | Queue a clip, tap **Middle/Sync**, average over the upload | ~210 mA |
+>
+> Four numbers. They convert this entire document from planning fiction into an
+> engineering budget, and they decide which optimizations are worth building.
+> Until they exist, treat any "this saves battery" claim in this repo — including
+> the ones below — as a hypothesis.
+>
+> Do **not** measure deep sleep by enabling it on this board without reading the
+> deep-sleep section first: a wake does not restore USB-Serial/JTAG and there is
+> no reset button, so it can strand the device un-reflashable.
 
 ## TL;DR
 
@@ -128,12 +157,19 @@ the "months" estimate into a real number. Also confirm the Waveshare
 
 ## Make this real (replace estimates with measurements)
 
+This is the procedure for the four measurements called out at the top of this
+file — it is the highest-value work session available on this project.
+
 1. Read the **actual cell capacity** off the battery and pick the right table row.
 2. Put a USB power meter (or a multimeter in series with the cell) on the board
-   and record steady-state current in each state: ready screen-on, ready
-   screen-off, recording, and during a sync. Replace the table above.
+   and record steady-state current in each of the four states: ready screen-on,
+   ready screen-off, recording, and during a sync. Replace the table above.
 3. With real per-state currents and capacity, recompute `life = capacity × 0.85 ÷ current`.
-4. Then implement deep sleep and measure standby draw to confirm the months-scale
-   number.
+4. Only then re-litigate the codec/sleep tradeoffs. Until step 2 exists there is
+   no evidence for which of them pays for itself — e.g. whether an on-device
+   Opus encode (~70% of a core on ESP32 @240 MHz, unverified on the S3) beats
+   the near-free ADPCM path on a radio that runs for seconds per clip.
+5. Deep sleep standby is the *last* measurement, not the first, and only on a
+   board you can recover — see the deep-sleep section above for why.
 
-_Last updated 2026-06-16. Estimates only — no current measured yet._
+_Last updated 2026-08-01. Estimates only — **no current measured yet**._

@@ -4,7 +4,7 @@
 
 1. **Cloud-first, local-capable.** Transcription works with a cloud API or local providers, and every transcription provider implements the same interface. Adding more desktop/mobile inference later is a new class, not a rewrite.
 2. **Pipeline is provider-agnostic end to end.** Transcription, diarization, and summarization are each swappable behind a protocol. The orchestrator never imports a concrete provider.
-3. **The device is dumb on purpose.** Firmware records WAV and uploads. All intelligence lives server-side, so the same firmware works as models improve.
+3. **The device is dumb on purpose.** Firmware records WAV and uploads. All intelligence lives server-side, so the same firmware works as models improve. This is not a stopgap — see [Why no on-device LLM](#why-no-on-device-llm-and-what-does-fit).
 
 ## Data flow
 
@@ -31,6 +31,30 @@
                           v
                   GET /v1/recordings/{id}   client fetches text, speakers, summary
 ```
+
+## Capture, storage, and transfer formats
+
+These are three different things, and conflating them causes bad "optimizations".
+
+| Stage | Format | Rate | Why |
+|---|---|---|---|
+| **Capture** (I2S) | 16-bit **stereo** | 230 MB/h | The ES7210 exposes two mics as two TDM slots; the PDM path uses stereo slot mode. This is the board-native wire format, not a storage choice. |
+| **Storage** (microSD) | 16-bit **mono** PCM WAV | **115 MB/h** | `app_main.c` averages L+R (`pcm_to_mono()`) before every `wav_write()`; `WAV_CHANNELS` is already `1`. |
+| **Transfer** (Wi-Fi upload) | Ogg Opus, else Open Plaud ADPCM, else mono PCM | ~10 / 28.8 / 115 MB/h | `net_upload.c`, gated by `OPEN_PLAUD_COMPRESS_TRANSFERS` / `OPEN_PLAUD_OPUS_TRANSFERS`. |
+
+Two consequences worth stating explicitly, because both get proposed as bugs:
+
+- **`AUDIO_CHANNELS` is 2 and should stay 2.** It describes what the codec
+  clocks out, not what lands on the card. Setting it to 1 would not save a
+  single SD byte — the downmix already happened — and it would break the ES7210
+  two-slot TDM configuration while throwing away the ~3 dB of noise averaging
+  the second mic buys.
+- **The server must accept more than PCM WAV.** With the shipped firmware
+  defaults, a clip arrives as `rec_NNNN.opus` (`audio/ogg`) or, with Opus off,
+  as the `OPADPCM1` container (`application/vnd.openplaud.adpcm`). Ingest
+  decodes the ADPCM container to canonical PCM WAV on arrival so that every
+  downstream provider — including `whisper_cpp`, which reads only 16-bit PCM —
+  keeps working unchanged.
 
 ## The pluggable layer (why this matters)
 
@@ -73,6 +97,75 @@ the `pyannote` / `whisperx` diarization providers, plus the `claude` and
 upload endpoint runs the server pipeline as a background task; recordings
 persist in SQLite. A bundled Core ML / TFLite Whisper mobile engine remains a
 future optional backend.
+
+## Why no on-device LLM (and what *does* fit)
+
+This is the most frequently proposed change to the project, so here is the
+arithmetic once, with primary sources. **It does not fit, and it is not close.**
+
+The recorder is an ESP32-S3R8: **8 MB of octal PSRAM** and 16 MB of flash
+(`firmware/sdkconfig.defaults`). That 8 MB is the entire budget a model would
+have to live in — shared with the audio DMA buffers, the FATFS/SD stack, the
+LCD framebuffer, and the Wi-Fi/TLS stack.
+
+| Candidate | Published size | vs. 8 MB PSRAM |
+|---|---|---|
+| Qwen2.5-0.5B-Instruct, Q4_K_M GGUF | **491 MB** | **~61x over** |
+| Qwen2.5-0.5B-Instruct, Q2_K GGUF | **415 MB** | **~52x over** |
+| Whisper `tiny`, memory required to run | **~273 MB** | **~34x over** |
+
+Three things follow, and each one kills the idea independently:
+
+1. **Quantizing harder does not rescue it.** Going from Q4_K_M (491 MB) to Q2_K
+   (415 MB) — a far more destructive quantization — buys only **15%**. At the
+   0.5B scale the token-embedding matrix and the output head dominate the file,
+   and those are kept at higher precision precisely because crushing them
+   destroys the model. You cannot quantize your way across a 60x gap.
+2. **Whisper needs ~273 MB just to run**, and `whisper.cpp` has no
+   microcontroller target at all — it targets hosts with an OS, a real
+   allocator, and SIMD. `tiny` is 75 MiB on disk but ~273 MB resident.
+3. **Better silicon does not close it either.** The largest ESP32-P4 variant
+   ships 32 MB of PSRAM. 491 MB against 32 MB is still **~15x over**. This is a
+   category gap, not a next-generation-part gap.
+
+For comparison, the devices this project is measured against made the same call:
+Omi's nRF5340 wearable runs **no** ASR, **no** wake word, and **no** LLM on the
+device, and Plaud Note Pro does all transcription in the cloud.
+
+### What *is* achievable on-device
+
+Espressif's ESP-SR does run real speech models on this exact SoC — they are just
+not transcription or generation:
+
+| Feature | Cost (ESP32-S3) | What you actually get |
+|---|---|---|
+| **WakeNet9** (wake word), quantized, 2-channel | **16 KB internal RAM + 324 KB PSRAM**, 3.0 ms per 32 ms frame (**~9% of one core**) | Detects *one* fixed wake phrase. Not transcription. |
+| **MultiNet7** (command words), quantized | **18 KB internal RAM + 2.92 MB PSRAM** | At most **200 FIXED commands**, **Chinese/English only** |
+
+MultiNet's limits are the important part: the command list is fixed at build
+time, and the docs state plainly that **mixed Chinese and English is not
+supported in command words**. There is no Korean model, so for this project's
+Korean-language use case there is **no on-device recognition path at all** —
+only cloud or desktop transcription.
+
+And note what 2.92 MB of PSRAM for 200 fixed commands implies about the budget:
+MultiNet alone would consume ~37% of the SoC's entire PSRAM to recognize a
+closed vocabulary. That is the same budget the device needs for capture buffers
+and the endurance work below.
+
+### The real gap is endurance, not intelligence
+
+Against Plaud (30 h recording, 60-day standby, 64 GB), open-plaud's estimated
+**2–5 h of continuous recording** (`docs/POWER.md`) is where the product loses.
+On-device inference would spend exactly the power budget needed to close that
+gap, to do worse than the server already does for free. Every mW is better spent
+on capture efficiency and standby draw.
+
+**Sources**
+- Qwen2.5-0.5B-Instruct GGUF file sizes — <https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF>
+- whisper.cpp model disk/memory table — <https://github.com/ggml-org/whisper.cpp>
+- ESP-SR WakeNet/MultiNet resource benchmarks — <https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/benchmark/README.html>
+- MultiNet language/command limits — <https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/speech_command_recognition/README.html>
 
 ## Components
 
