@@ -56,6 +56,27 @@ Two consequences worth stating explicitly, because both get proposed as bugs:
   downstream provider — including `whisper_cpp`, which reads only 16-bit PCM —
   keeps working unchanged.
 
+### Why the card still holds uncompressed PCM
+
+Compressing the *stored* clip (rather than only the transferred one) would cut
+SD writes ~4x, and it is a reasonable thing to want. It is deliberately not done
+yet, for two reasons:
+
+- **PCM on the card is the archival format everything else assumes.** The BLE
+  chunker (`ble_companion.c`) seeks into the WAV by sample offset, and
+  `make_upload_plan()` in `net_upload.c` refuses anything that is not canonical
+  16-bit PCM. Both would need to change together, and a partially-written
+  compressed clip after a crash is far harder to salvage than a truncated PCM one.
+- **SD bytes are not the binding constraint.** At 115 MB/h even a 32 GB card
+  holds ~278 h of audio, against a battery that lasts an estimated 2–5 h. The
+  card outlasts the cell by roughly two orders of magnitude. The write *energy*
+  might still be worth reclaiming — but nobody has measured it, so there is no
+  evidence it pays for the complexity. See `docs/POWER.md`.
+
+Sequence matters here: measure the four steady-state currents first, then decide
+whether on-card compression (or Opus, which costs meaningfully more CPU) earns
+its keep.
+
 ## The pluggable layer (why this matters)
 
 Each stage is defined by a `Protocol`. Concrete providers register themselves; the orchestrator resolves them by name from config. This is what lets cloud and local providers coexist without changing the pipeline.

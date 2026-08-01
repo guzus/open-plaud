@@ -131,7 +131,7 @@ def _decode(raw: bytes, *, max_output_bytes: int = 8 * 1024 * 1024) -> bytes:
     return out.getvalue()
 
 
-def _wav_samples(raw: bytes) -> tuple[wave._wave_params, list[int]]:  # type: ignore[name-defined]
+def _wav_samples(raw: bytes) -> tuple[wave._wave_params, list[int]]:
     with wave.open(io.BytesIO(raw), "rb") as wav:
         params = wav.getparams()
         frames = wav.readframes(wav.getnframes())
