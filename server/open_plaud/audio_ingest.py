@@ -1,15 +1,27 @@
 """Normalize device upload containers into something every provider can read.
 
 The firmware compresses Wi-Fi transfers (`OPEN_PLAUD_COMPRESS_TRANSFERS`): a clip
-arrives either as Ogg Opus, or — with Opus off — as the dependency-free **Open
-Plaud ADPCM** container that `firmware/main/net_upload.c` writes. Neither is PCM
-WAV, and `whisper_cpp` reads only 16-bit PCM WAV, so an ADPCM upload is decoded
-back to canonical PCM here, at ingest, once. Downstream stages then never learn
-that a transfer codec existed.
+arrives either as Ogg Opus, or — with Opus off, which is what a stock build
+actually does — as the dependency-free **Open Plaud ADPCM** container that
+`firmware/main/net_upload.c` writes. Neither is PCM WAV, and the only local
+transcription provider, `whisper_cpp`, reads 16-bit PCM WAV and nothing else
+(it hands `-f <path>` straight to the whisper.cpp CLI). So an ADPCM upload is
+decoded back to canonical PCM here, at ingest, once, and downstream stages never
+learn that a transfer codec existed.
 
-Opus is passed through untouched: it is a real container that ffmpeg-backed
-providers (whisperx) and the OpenAI API already accept, and re-encoding it would
-only lose quality.
+**Watch the filename.** The device does *not* name an ADPCM part `.opadpcm`: it
+sends the WAV name off the SD card (`rec_NNNN.wav`) and flips only the content
+type to `application/vnd.openplaud.adpcm`. Detection is therefore by magic bytes
+(`looks_like_opadpcm`), never by suffix — a suffix check silently stores corrupt
+audio for every stock device. See docs/ARCHITECTURE.md.
+
+Opus is passed through untouched: re-encoding it would only lose quality, and
+the OpenAI transcription API accepts Ogg Opus directly. Note the asymmetry this
+leaves — `whisper_cpp` cannot read Opus, so a self-hoster running the local
+provider must keep the firmware on its ADPCM default (or supply the sidecar's
+Opus to a cloud provider). Transcoding Opus to WAV here would mean taking an
+ffmpeg dependency, which this module deliberately does not do; the constraint is
+documented in README.md instead.
 
 Container layout (byte-for-byte the same as `server-go`'s decoder, so both
 servers accept the same device):
@@ -167,6 +179,17 @@ def decode_opadpcm(source: BinaryIO, destination: BinaryIO, *, max_output_bytes:
     over-long payload raises instead of yielding half a clip. The device keeps
     the clip queued on SD until the upload is accepted, so failing loudly costs
     a retry, while silently storing a partial clip would lose audio for good.
+
+    `max_output_bytes` is the *decoded* size cap, and callers pass the upload cap
+    for it. That is not an oversight and it does not diverge from `server-go`,
+    whose only call site is
+    `decodeOpenPlaudADPCMToWAV(out, part, s.maxBytes, s.maxBytes)` (main.go:391)
+    — the same value for both bounds. It cannot reject a legitimate clip either:
+    the firmware caps a recording at `OPEN_PLAUD_MAX_REC_SECONDS`, whose Kconfig
+    range tops out at 7200 s, and 7200 s of 16 kHz mono 16-bit PCM is 230.4 MB
+    against a 512 MB default. Reaching the cap needs a >4 h clip the device will
+    not produce. Keeping the bound tight is also what stops a hand-crafted header
+    claiming a huge `samples_per_channel` from being honoured.
     """
     sample_rate, channels, samples_per_channel, states = _read_header(source)
 
@@ -214,3 +237,31 @@ def decode_opadpcm_file(source: Path, destination: Path, *, max_output_bytes: in
     """File-to-file wrapper around `decode_opadpcm`. Returns bytes written."""
     with source.open("rb") as src, destination.open("wb") as dst:
         return decode_opadpcm(src, dst, max_output_bytes=max_output_bytes)
+
+
+def unwrap_opadpcm_file(
+    stored: Path, filename: str, *, max_output_bytes: int
+) -> tuple[Path, str, str]:
+    """Replace an ADPCM container on disk with canonical PCM WAV, in place.
+
+    Returns the (path, filename, content_type) to persist. Shared by the upload
+    endpoint and the offline repair tool so the delicate part below has exactly
+    one implementation.
+
+    The decode writes to a temp file and renames, because the source is usually
+    *already sitting at the `.wav` path we are about to produce* — the device
+    sends ADPCM bytes under the name `rec_NNNN.wav`, so `stored` and the decode
+    target are the same file. Decoding a file onto itself would truncate the
+    source mid-read. The rename is also what makes this crash-safe: either the
+    original container or the complete WAV is on disk, never a half-written one.
+    """
+    scratch = stored.with_name(f"{stored.stem}.pcm.tmp")
+    final = stored.with_suffix(".wav")
+    try:
+        decode_opadpcm_file(stored, scratch, max_output_bytes=max_output_bytes)
+    except BaseException:
+        scratch.unlink(missing_ok=True)
+        raise
+    stored.unlink(missing_ok=True)
+    scratch.replace(final)
+    return final, f"{Path(filename).stem}.wav", "audio/wav"

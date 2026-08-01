@@ -36,8 +36,8 @@ from open_plaud.audio_ingest import (
     OPADPCM_MEDIA_TYPE,
     OPADPCM_SUFFIX,
     OpenPlaudADPCMError,
-    decode_opadpcm_file,
     looks_like_opadpcm,
+    unwrap_opadpcm_file,
 )
 from open_plaud.config import Config
 from open_plaud.pipeline.orchestrator import Pipeline
@@ -166,27 +166,17 @@ def _audio_duration_seconds(path: Path) -> float | None:
 def _unwrap_opadpcm(destination: Path, filename: str) -> tuple[Path, str, str]:
     """Replace an Open Plaud ADPCM upload with canonical PCM WAV, on disk.
 
-    Returns the (path, filename, content_type) to persist. Decoding happens once,
-    here, so no provider ever meets the transfer container — `whisper_cpp` in
-    particular reads 16-bit PCM WAV and nothing else. Opus is deliberately NOT
-    touched: it is a real container that ffmpeg-backed providers and the OpenAI
-    API already accept, and transcoding it would only throw quality away.
+    Decoding happens once, here, so no provider ever meets the transfer
+    container — `whisper_cpp` in particular reads 16-bit PCM WAV and nothing
+    else. Opus is deliberately NOT touched: the OpenAI API accepts it directly
+    and transcoding would only throw quality away.
 
-    The decode writes to a temp file and renames, because the upload may already
-    be sitting at the `.wav` path we are about to produce (a client is free to
-    send the ADPCM content type under a `.wav` name) and decoding a file onto
-    itself would truncate the source.
+    The temp-file+rename lives in `audio_ingest` so the offline repair tool
+    (`python -m open_plaud.repair`) reuses this exact behaviour.
     """
-    scratch = destination.with_name(f"{destination.stem}.pcm.tmp")
-    final = destination.with_suffix(".wav")
-    try:
-        decode_opadpcm_file(destination, scratch, max_output_bytes=config.upload_max_bytes)
-    except BaseException:
-        scratch.unlink(missing_ok=True)
-        raise
-    destination.unlink(missing_ok=True)
-    scratch.replace(final)
-    return final, f"{Path(filename).stem}.wav", "audio/wav"
+    return unwrap_opadpcm_file(
+        destination, filename, max_output_bytes=config.upload_max_bytes
+    )
 
 
 def _recording_duration_seconds(rec: Recording) -> float | None:

@@ -206,5 +206,34 @@ async def test_unexpected_json_shape_raises(tmp_path: Path) -> None:
         await provider.transcribe(_audio(tmp_path), TranscribeOptions())
 
 
+async def test_opus_upload_fails_with_an_actionable_message(tmp_path: Path) -> None:
+    # Opus is passed through ingest untouched, so it can reach this provider —
+    # which cannot read it. The error must say so rather than surfacing whatever
+    # the CLI prints.
+    opus = tmp_path / "rec.opus"
+    opus.write_bytes(b"OggS" + b"\x00" * 32)
+    audio = AudioRef(
+        path=opus, filename="rec.opus", content_type="audio/ogg", size_bytes=36
+    )
+    provider = WhisperCppTranscriber(
+        bin_path=_fake_cli(tmp_path), model_path=_model(tmp_path)
+    )
+
+    with pytest.raises(RuntimeError, match="not a PCM WAV file.*OggS"):
+        await provider.transcribe(audio, TranscribeOptions())
+
+
+async def test_adpcm_container_named_wav_is_rejected_by_magic(tmp_path: Path) -> None:
+    # Belt and braces for the bug this branch is about: if an undecoded container
+    # ever reaches transcription under its `.wav` name, fail loudly.
+    audio = _audio(tmp_path, content=b"OPADPCM1" + b"\x00" * 14)
+    provider = WhisperCppTranscriber(
+        bin_path=_fake_cli(tmp_path), model_path=_model(tmp_path)
+    )
+
+    with pytest.raises(RuntimeError, match="not a PCM WAV file"):
+        await provider.transcribe(audio, TranscribeOptions())
+
+
 def test_package_wiring_exposes_whisper_cpp() -> None:
     assert "whisper_cpp" in transcription.available()

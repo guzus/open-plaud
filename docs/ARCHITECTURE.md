@@ -40,7 +40,7 @@ These are three different things, and conflating them causes bad "optimizations"
 |---|---|---|---|
 | **Capture** (I2S) | 16-bit **stereo** | 230 MB/h | The ES7210 exposes two mics as two TDM slots; the PDM path uses stereo slot mode. This is the board-native wire format, not a storage choice. |
 | **Storage** (microSD) | 16-bit **mono** PCM WAV | **115 MB/h** | `app_main.c` averages L+R (`pcm_to_mono()`) before every `wav_write()`; `WAV_CHANNELS` is already `1`. |
-| **Transfer** (Wi-Fi upload) | Ogg Opus, else Open Plaud ADPCM, else mono PCM | ~10 / 28.8 / 115 MB/h | `net_upload.c`, gated by `OPEN_PLAUD_COMPRESS_TRANSFERS` / `OPEN_PLAUD_OPUS_TRANSFERS`. |
+| **Transfer** (Wi-Fi upload) | Open Plaud ADPCM by default; Ogg Opus only with the sidecar enabled; else mono PCM | 28.8 / ~10 / 115 MB/h | `net_upload.c`, gated by `OPEN_PLAUD_COMPRESS_TRANSFERS` / `OPEN_PLAUD_OPUS_TRANSFERS` / `OPEN_PLAUD_PREPARE_OPUS_SIDECAR`. |
 
 Two consequences worth stating explicitly, because both get proposed as bugs:
 
@@ -49,12 +49,49 @@ Two consequences worth stating explicitly, because both get proposed as bugs:
   single SD byte — the downmix already happened — and it would break the ES7210
   two-slot TDM configuration while throwing away the ~3 dB of noise averaging
   the second mic buys.
-- **The server must accept more than PCM WAV.** With the shipped firmware
-  defaults, a clip arrives as `rec_NNNN.opus` (`audio/ogg`) or, with Opus off,
-  as the `OPADPCM1` container (`application/vnd.openplaud.adpcm`). Ingest
-  decodes the ADPCM container to canonical PCM WAV on arrival so that every
-  downstream provider — including `whisper_cpp`, which reads only 16-bit PCM —
-  keeps working unchanged.
+- **The server must accept more than PCM WAV.** With the shipped defaults a clip
+  arrives as the `OPADPCM1` container, *not* as Opus — see the wire contract
+  below. Ingest decodes that container to canonical PCM WAV on arrival so that
+  every downstream provider — including `whisper_cpp`, which reads only 16-bit
+  PCM — keeps working unchanged.
+
+### Upload wire contract (what the device actually sends)
+
+Getting this wrong corrupts audio silently, so it is spelled out exactly.
+`upload_file_adpcm()` in `net_upload.c` names the multipart part after the
+**WAV on the SD card** and changes only the `Content-Type`. It never renames the
+part to `.opadpcm`.
+
+| Firmware state | `filename=` | `Content-Type` | Body |
+|---|---|---|---|
+| **Default build** | `rec_NNNN.wav` | `application/vnd.openplaud.adpcm` | `OPADPCM1` container |
+| Opus sidecar present | `rec_NNNN.opus` | `audio/ogg` | Ogg Opus |
+| `OPEN_PLAUD_COMPRESS_TRANSFERS=n` | `rec_NNNN.wav` | `audio/wav` | 16-bit PCM WAV |
+
+**The default row is the one that matters.** `OPEN_PLAUD_OPUS_TRANSFERS` is `y`,
+but the Opus upload path requires a sidecar file written at record time, and
+`OPEN_PLAUD_PREPARE_OPUS_SIDECAR` defaults to **`n`** (Kconfig.projbuild) with no
+`sdkconfig.defaults` override. With no sidecar on disk `net_upload.c` logs
+`no Opus sidecar for ...; using ADPCM transfer` and falls back. So a stock build
+uploads ADPCM under a `.wav` filename for every clip, and Opus only ever appears
+when a self-hoster turns the sidecar on.
+
+Consequences for anyone writing a compatible server:
+
+- **Never dispatch on the filename suffix.** `.wav` here means "ADPCM bytes"
+  more often than it means WAV. A suffix check accepts the upload and stores an
+  unplayable file — which is precisely the bug this contract documents.
+- **Dispatch on `application/vnd.openplaud.adpcm`, and prefer sniffing the
+  8-byte `OPADPCM1` magic.** `server-go` matches suffix-or-content-type
+  (`isOpenPlaudADPCMUpload`); the Python server additionally sniffs the magic and
+  trusts only the bytes. Sniffing is strictly safer — it also catches a client
+  that forgets the vendor content type.
+- **Store the decoded result, not the container**, and rewrite the name to
+  `.wav` and the type to `audio/wav` as both servers do.
+
+Servers that already ingested from a device before implementing this hold raw
+containers on disk under `.wav` names. `python -m open_plaud.repair` finds and
+fixes them (see README).
 
 ### Why the card still holds uncompressed PCM
 

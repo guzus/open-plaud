@@ -127,7 +127,35 @@ class WhisperCppTranscriber:
             extra_args = shlex.split(os.environ.get(_ARGS_ENV, ""))
         self._extra_args = tuple(extra_args)
 
+    @staticmethod
+    def _require_wav(audio: AudioRef) -> None:
+        """Fail with a useful message when handed audio whisper.cpp cannot read.
+
+        The CLI accepts PCM WAV only. Ingest decodes the device's ADPCM container
+        to WAV, but Ogg Opus is passed through deliberately (the server takes no
+        ffmpeg dependency), so an Opus upload reaches here intact and whisper.cpp
+        rejects it with an opaque error. Say what is actually wrong instead.
+
+        Checked by magic, not by suffix: the recorder's habit of naming non-WAV
+        payloads `.wav` is exactly why this project does not trust suffixes.
+        """
+        try:
+            with audio.path.open("rb") as handle:
+                head = handle.read(12)
+        except OSError as exc:
+            raise RuntimeError(f"whisper_cpp: cannot read {audio.path}: {exc}") from exc
+        if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+            raise RuntimeError(
+                f"whisper_cpp: {audio.filename} is not a PCM WAV file "
+                f"(starts with {head[:4]!r}), and the whisper.cpp CLI reads "
+                "nothing else. Ogg Opus uploads are stored as-is: transcribe "
+                "them with a cloud provider, or turn the firmware's Opus "
+                "sidecar off so clips arrive as Open Plaud ADPCM, which the "
+                "server decodes to WAV at ingest."
+            )
+
     async def transcribe(self, audio: AudioRef, opts: TranscribeOptions) -> Transcript:
+        self._require_wav(audio)
         with tempfile.TemporaryDirectory(prefix="open-plaud-whisper-cpp-") as tmpdir:
             out_base = Path(tmpdir) / audio.path.stem
             cmd = [
