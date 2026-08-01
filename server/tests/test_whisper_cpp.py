@@ -206,32 +206,47 @@ async def test_unexpected_json_shape_raises(tmp_path: Path) -> None:
         await provider.transcribe(_audio(tmp_path), TranscribeOptions())
 
 
-async def test_opus_upload_fails_with_an_actionable_message(tmp_path: Path) -> None:
-    # Opus is passed through ingest untouched, so it can reach this provider —
-    # which cannot read it. The error must say so rather than surfacing whatever
-    # the CLI prints.
-    opus = tmp_path / "rec.opus"
-    opus.write_bytes(b"OggS" + b"\x00" * 32)
-    audio = AudioRef(
-        path=opus, filename="rec.opus", content_type="audio/ogg", size_bytes=36
-    )
-    provider = WhisperCppTranscriber(
-        bin_path=_fake_cli(tmp_path), model_path=_model(tmp_path)
+def _opus(tmp_path: Path) -> AudioRef:
+    path = tmp_path / "rec.opus"
+    path.write_bytes(b"OggS" + b"\x00" * 32)
+    return AudioRef(
+        path=path, filename="rec.opus", content_type="audio/ogg", size_bytes=36
     )
 
-    with pytest.raises(RuntimeError, match="not a PCM WAV file.*OggS"):
-        await provider.transcribe(audio, TranscribeOptions())
+
+async def test_failure_on_non_wav_input_explains_the_format(tmp_path: Path) -> None:
+    # Opus is passed through ingest untouched, so it can reach this provider. If
+    # the CLI then fails, the error should name the likely cause instead of
+    # leaving the operator with a bare exit code.
+    bin_path = _fake_cli(
+        tmp_path, payload=None, exit_code=1, stderr_line="failed to read audio"
+    )
+    provider = WhisperCppTranscriber(bin_path=bin_path, model_path=_model(tmp_path))
+
+    with pytest.raises(RuntimeError, match="not PCM WAV.*OggS.*WHISPER_FFMPEG"):
+        await provider.transcribe(_opus(tmp_path), TranscribeOptions())
 
 
-async def test_adpcm_container_named_wav_is_rejected_by_magic(tmp_path: Path) -> None:
-    # Belt and braces for the bug this branch is about: if an undecoded container
-    # ever reaches transcription under its `.wav` name, fail loudly.
+async def test_non_wav_input_is_still_handed_to_the_cli(tmp_path: Path) -> None:
+    # whisper.cpp built with WHISPER_FFMPEG=ON reads Opus. Refusing it up front
+    # would break that setup, so a successful run must stay successful.
+    bin_path = _fake_cli(tmp_path)
+    provider = WhisperCppTranscriber(bin_path=bin_path, model_path=_model(tmp_path))
+
+    transcript = await provider.transcribe(_opus(tmp_path), TranscribeOptions())
+
+    assert transcript.text
+
+
+async def test_undecoded_adpcm_container_is_rejected_by_magic(tmp_path: Path) -> None:
+    # The bug this branch is about: no build of whisper.cpp can read a raw
+    # container, so fail immediately and point at the repair tool.
     audio = _audio(tmp_path, content=b"OPADPCM1" + b"\x00" * 14)
     provider = WhisperCppTranscriber(
         bin_path=_fake_cli(tmp_path), model_path=_model(tmp_path)
     )
 
-    with pytest.raises(RuntimeError, match="not a PCM WAV file"):
+    with pytest.raises(RuntimeError, match="raw Open Plaud ADPCM container.*repair"):
         await provider.transcribe(audio, TranscribeOptions())
 
 

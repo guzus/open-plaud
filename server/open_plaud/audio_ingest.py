@@ -17,11 +17,11 @@ audio for every stock device. See docs/ARCHITECTURE.md.
 
 Opus is passed through untouched: re-encoding it would only lose quality, and
 the OpenAI transcription API accepts Ogg Opus directly. Note the asymmetry this
-leaves — `whisper_cpp` cannot read Opus, so a self-hoster running the local
-provider must keep the firmware on its ADPCM default (or supply the sidecar's
-Opus to a cloud provider). Transcoding Opus to WAV here would mean taking an
-ffmpeg dependency, which this module deliberately does not do; the constraint is
-documented in README.md instead.
+leaves — a stock `whisper.cpp` cannot read Opus (only a `WHISPER_FFMPEG` build
+can), so a self-hoster running the local provider should keep the firmware on
+its ADPCM default, or send Opus to a cloud provider. Transcoding Opus to WAV
+here would mean taking an ffmpeg dependency, which this module deliberately does
+not do; the constraint is documented in README.md instead.
 
 Container layout (byte-for-byte the same as `server-go`'s decoder, so both
 servers accept the same device):

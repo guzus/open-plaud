@@ -115,11 +115,12 @@ Repaired recordings go back to `received` with their transcript cleared — the
 old text was produced from corrupt audio — so re-run the pipeline for each id it
 prints (the "Reprocess" button, or `POST /rec/{id}/reprocess`).
 
-One asymmetry to know about: `whisper_cpp` reads 16-bit PCM WAV only, so it
-cannot transcribe Opus uploads. Keep the firmware on its ADPCM default when
-self-hosting local transcription, or send Opus to a cloud provider (the OpenAI
-API accepts it). The server does not transcode Opus, because that would mean
-taking an ffmpeg dependency.
+One asymmetry to know about: a stock `whisper.cpp` reads 16-bit PCM WAV only, so
+it cannot transcribe Opus uploads unless it was built with `WHISPER_FFMPEG`. The
+server does not transcode Opus itself — that would mean taking an ffmpeg
+dependency — so with local transcription either leave the firmware on its ADPCM
+default (decoded to WAV at ingest) or send Opus to a cloud provider; the OpenAI
+API accepts it directly.
 
 By default the pipeline is a no-op (stores audio, empty transcript) so it runs
 with no API keys. To actually transcribe + summarize, set the keys in `.env` and
