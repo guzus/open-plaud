@@ -90,6 +90,38 @@ curl -F "file=@rec_0001.wav;type=audio/wav" http://127.0.0.1:8000/v1/recordings
 # the pipeline runs in the background; poll GET /v1/recordings/{id} for the result
 ```
 
+`POST /v1/recordings` accepts ordinary audio uploads, Ogg Opus (`audio/ogg`) and
+the Open Plaud ADPCM container (`application/vnd.openplaud.adpcm`). ADPCM is
+decoded to 16-bit PCM WAV at ingest so every transcription provider sees plain
+WAV; Opus is passed through untouched.
+
+> **Writing your own server? Do not trust the filename.** A stock device uploads
+> the ADPCM container under the name `rec_NNNN.wav` — it changes only the
+> content type. Dispatch on `application/vnd.openplaud.adpcm` or, better, sniff
+> the 8-byte `OPADPCM1` magic; a suffix check stores unplayable audio for every
+> sync. Full wire contract in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+If you synced a device against a server built before ADPCM ingest, those uploads
+were accepted with HTTP 200 and written to disk as raw containers named `.wav`.
+Find and fix them (dry run first):
+
+```bash
+cd server
+uv run python -m open_plaud.repair            # report what is corrupt
+uv run python -m open_plaud.repair --apply    # decode in place, reset the rows
+```
+
+Repaired recordings go back to `received` with their transcript cleared — the
+old text was produced from corrupt audio — so re-run the pipeline for each id it
+prints (the "Reprocess" button, or `POST /rec/{id}/reprocess`).
+
+One asymmetry to know about: a stock `whisper.cpp` reads 16-bit PCM WAV only, so
+it cannot transcribe Opus uploads unless it was built with `WHISPER_FFMPEG`. The
+server does not transcode Opus itself — that would mean taking an ffmpeg
+dependency — so with local transcription either leave the firmware on its ADPCM
+default (decoded to WAV at ingest) or send Opus to a cloud provider; the OpenAI
+API accepts it directly.
+
 By default the pipeline is a no-op (stores audio, empty transcript) so it runs
 with no API keys. To actually transcribe + summarize, set the keys in `.env` and
 select the cloud providers:

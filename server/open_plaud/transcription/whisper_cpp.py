@@ -17,6 +17,7 @@ from asyncio.subprocess import PIPE
 from collections.abc import Sequence
 from pathlib import Path
 
+from open_plaud.audio_ingest import OPADPCM_MAGIC
 from open_plaud.transcription.base import register
 from open_plaud.types import AudioRef, TranscribeOptions, Transcript, TranscriptSegment
 
@@ -127,7 +128,50 @@ class WhisperCppTranscriber:
             extra_args = shlex.split(os.environ.get(_ARGS_ENV, ""))
         self._extra_args = tuple(extra_args)
 
+    @staticmethod
+    def _sniff(audio: AudioRef) -> bytes:
+        """First bytes of the clip. Checked by magic, never by suffix — the
+        recorder's habit of naming non-WAV payloads `.wav` is the whole reason
+        this project does not trust suffixes."""
+        try:
+            with audio.path.open("rb") as handle:
+                return handle.read(12)
+        except OSError as exc:
+            raise RuntimeError(f"whisper_cpp: cannot read {audio.path}: {exc}") from exc
+
+    @staticmethod
+    def _format_hint(head: bytes) -> str:
+        """Explain a failure on input that was never PCM WAV to begin with.
+
+        Deliberately a *hint appended to a real failure*, not a preflight
+        rejection: whisper.cpp can be built with `WHISPER_FFMPEG=ON`, which does
+        read Opus and friends, and refusing that input up front would break a
+        working self-hosted setup. Let the CLI decide, and only explain the
+        format angle if it actually failed.
+        """
+        if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+            return ""
+        return (
+            " — note that this input is not PCM WAV (it starts with "
+            f"{head[:4]!r}), and whisper.cpp reads WAV only unless it was built "
+            "with WHISPER_FFMPEG. Ogg Opus uploads are stored as received: "
+            "transcribe them with a cloud provider, or leave the firmware's "
+            "Opus sidecar off so clips arrive as Open Plaud ADPCM, which the "
+            "server decodes to WAV at ingest."
+        )
+
     async def transcribe(self, audio: AudioRef, opts: TranscribeOptions) -> Transcript:
+        head = self._sniff(audio)
+        if head[: len(OPADPCM_MAGIC)] == OPADPCM_MAGIC:
+            # No build of whisper.cpp can read this, and it should never get
+            # here: ingest decodes the container. Reaching this point means a
+            # blob predating ADPCM ingest is still on disk.
+            raise RuntimeError(
+                f"whisper_cpp: {audio.filename} is still a raw Open Plaud ADPCM "
+                "container, not audio. Decode the stored clips first with "
+                "`python -m open_plaud.repair --apply`."
+            )
+
         with tempfile.TemporaryDirectory(prefix="open-plaud-whisper-cpp-") as tmpdir:
             out_base = Path(tmpdir) / audio.path.stem
             cmd = [
@@ -160,7 +204,8 @@ class WhisperCppTranscriber:
             if proc.returncode != 0:
                 tail = stderr.decode(errors="replace")[-_STDERR_TAIL:]
                 raise RuntimeError(
-                    f"whisper_cpp: {self._bin} exited with code {proc.returncode}: {tail}"
+                    f"whisper_cpp: {self._bin} exited with code {proc.returncode}: "
+                    f"{tail}{self._format_hint(head)}"
                 )
 
             json_path = Path(f"{out_base}.json")
