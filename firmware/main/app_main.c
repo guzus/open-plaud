@@ -104,6 +104,13 @@ static bool sync_may_wake_screen(void)
     return power_is_charging();
 }
 
+/* Short backoff after a failed upload pass so a wrong SSID / brief RF outage
+ * does not hammer the radio on every poll, but does NOT latch uploads off for
+ * the rest of the boot. A later Sync press (or boot retry) must be allowed to
+ * re-enter wifi_connect() once the network recovers. */
+#define WIFI_RETRY_BACKOFF_MS 5000
+static TickType_t s_wifi_fail_backoff_until = 0;
+
 static void retry_pending_clips(const char *context)
 {
     bool upload_failed = false;
@@ -113,6 +120,7 @@ static void retry_pending_clips(const char *context)
     if (upload_failed) {
         ESP_LOGW(TAG, "%s retry queue not fully drained; clips stay queued on SD",
                  context);
+        s_wifi_fail_backoff_until = xTaskGetTickCount() + pdMS_TO_TICKS(WIFI_RETRY_BACKOFF_MS);
     }
 }
 
@@ -409,6 +417,12 @@ static void do_sync(int pending)
         return;
     }
 
+    const TickType_t now = xTaskGetTickCount();
+    if ((TickType_t)(now - s_wifi_fail_backoff_until) > (TickType_t)0) {
+        ESP_LOGI(TAG, "sync in backoff after recent Wi-Fi failure; retry later");
+        return;
+    }
+
     const status_info_t syncing = {
         .pending = pending, .elapsed_s = -1,
         .sync_done = 0, .sync_total = pending, .upload_pct = -1, .clip = NULL,
@@ -420,6 +434,7 @@ static void do_sync(int pending)
     bool failed = false;
     const int uploaded = rec_store_retry_pending(&failed, sync_progress, NULL);
     net_upload_shutdown();   /* stop Wi-Fi after the batch to cut idle draw */
+    if (failed) { s_wifi_fail_backoff_until = xTaskGetTickCount() + pdMS_TO_TICKS(WIFI_RETRY_BACKOFF_MS); }
     ESP_LOGI(TAG, "sync: %d uploaded%s", uploaded, failed ? " (stopped early)" : "");
 
     const int remaining = rec_store_pending_count();
